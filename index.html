@@ -386,6 +386,34 @@
       color: var(--muted)
     }
 
+    /* ── RESPONSIVE: Tablet & Mobile ── */
+    @media(max-width:1024px) {
+      .sidebar-desktop {
+        width: 64px !important
+      }
+
+      .sidebar-label {
+        display: none
+      }
+
+      .sidebar-brand-text {
+        display: none
+      }
+
+      .sidebar-section-label {
+        display: none
+      }
+
+      .sidebar-item {
+        justify-content: center;
+        padding: 10px
+      }
+
+      .sidebar-user-detail {
+        display: none
+      }
+    }
+
     @media(max-width:768px) {
       .sidebar-desktop {
         display: none !important
@@ -394,6 +422,226 @@
       .mobile-nav {
         display: flex !important
       }
+
+      .main-content {
+        padding-bottom: 68px !important
+      }
+
+      .toast {
+        bottom: 80px !important;
+        right: 12px !important;
+        left: 12px !important
+      }
+
+      .toast-item {
+        min-width: unset !important
+      }
+
+      .modal {
+        margin: 8px !important;
+        border-radius: 12px !important
+      }
+
+      .modal-overlay {
+        padding: 8px !important;
+        align-items: flex-end !important
+      }
+
+      .modal {
+        border-radius: 20px 20px 0 0 !important;
+        max-height: 95vh !important
+      }
+
+      .stat-card {
+        padding: 14px !important
+      }
+
+      .btn-lg {
+        padding: 10px 20px !important;
+        font-size: 14px !important
+      }
+
+      .page-header {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 10px !important
+      }
+
+      .page-header-actions {
+        width: 100%
+      }
+
+      .page-header-actions .btn {
+        flex: 1;
+        justify-content: center
+      }
+    }
+
+    .mobile-nav {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      z-index: 90;
+      padding: 8px 4px;
+      padding-bottom: calc(8px + env(safe-area-inset-bottom));
+      gap: 2px;
+      justify-content: space-around;
+      align-items: center;
+    }
+
+    .mobile-nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 6px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--dim);
+      font-size: 10px;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .mobile-nav-item.active {
+      color: var(--primary);
+      background: rgba(245, 158, 11, .1);
+    }
+
+    .mobile-nav-item .nav-icon {
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    /* POS Cart Drawer (mobile) */
+    .pos-cart-drawer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border-radius: 20px 20px 0 0;
+      border-top: 1px solid var(--border2);
+      z-index: 80;
+      transform: translateY(100%);
+      transition: transform .3s cubic-bezier(.4, 0, .2, 1);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .pos-cart-drawer.open {
+      transform: translateY(0);
+    }
+
+    .pos-cart-fab {
+      position: fixed;
+      bottom: 76px;
+      right: 16px;
+      z-index: 79;
+      background: var(--primary);
+      color: #000;
+      border: none;
+      border-radius: 50px;
+      padding: 12px 20px;
+      font-weight: 800;
+      font-size: 14px;
+      font-family: var(--font);
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 20px rgba(245, 158, 11, .4);
+    }
+
+    @media(max-width:768px) {
+      .pos-cart-fab {
+        display: flex
+      }
+
+      .pos-right-panel {
+        display: none !important
+      }
+
+      .pos-container {
+        flex-direction: column
+      }
+    }
+
+    /* Responsive product grid */
+    @media(max-width:480px) {
+      .product-grid {
+        grid-template-columns: repeat(2, 1fr) !important
+      }
+
+      .stat-grid-5 {
+        grid-template-columns: repeat(2, 1fr) !important
+      }
+
+      .dash-stat-grid {
+        grid-template-columns: repeat(2, 1fr) !important
+      }
+
+      .dash-chart-grid {
+        grid-template-columns: 1fr !important
+      }
+
+      .dash-alert-grid {
+        grid-template-columns: repeat(2, 1fr) !important
+      }
+    }
+
+    @media(min-width:481px) and (max-width:768px) {
+      .product-grid {
+        grid-template-columns: repeat(3, 1fr) !important
+      }
+
+      .stat-grid-5 {
+        grid-template-columns: repeat(3, 1fr) !important
+      }
+
+      .dash-stat-grid {
+        grid-template-columns: repeat(2, 1fr) !important
+      }
+
+      .dash-chart-grid {
+        grid-template-columns: 1fr !important
+      }
+
+      .dash-alert-grid {
+        grid-template-columns: repeat(2, 1fr) !important
+      }
+    }
+
+    @media(min-width:769px) and (max-width:1024px) {
+      .dash-stat-grid {
+        grid-template-columns: repeat(2, 1fr) !important
+      }
+
+      .dash-chart-grid {
+        grid-template-columns: 1fr !important
+      }
+
+      .stat-grid-5 {
+        grid-template-columns: repeat(3, 1fr) !important
+      }
+    }
+
+    /* Swipe handle */
+    .drawer-handle {
+      width: 36px;
+      height: 4px;
+      background: var(--border2);
+      border-radius: 2px;
+      margin: 10px auto 6px;
+      flex-shrink: 0;
     }
   </style>
 </head>
@@ -607,6 +855,31 @@
     }
 
     // ═══════════════════════════════════════════════════
+    // MOBILE BOTTOM NAVIGATION
+    // ═══════════════════════════════════════════════════
+    function MobileNav({ view, setView, user }) {
+      const canAccess = (v) => {
+        if (v === 'dashboard') return true;
+        if (user.role === 'admin') return true;
+        if (user.role === 'kasir') return ['pos', 'member', 'hutang'].includes(v);
+        if (user.role === 'supervisor') return ['produk'].includes(v);
+        return false;
+      };
+      // Show only key nav items on mobile to avoid crowding
+      const mobileViews = ['dashboard', 'pos', 'produk', 'member', 'pengaturan'].filter(canAccess);
+      return (
+        <div className="mobile-nav">
+          {mobileViews.map(v => (
+            <div key={v} className={`mobile-nav-item ${view === v ? 'active' : ''}`} onClick={() => setView(v)}>
+              <span className="nav-icon">{VIEW_ICONS[v]}</span>
+              <span>{VIEW_LABELS[v].replace('POS Kasir', 'Kasir')}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
     // ICON COMPONENTS
     // ═══════════════════════════════════════════════════
     const Icon = ({ name, size = 16, color = 'currentColor' }) => {
@@ -812,8 +1085,8 @@
       return (
         <div style={{ width: 220, background: 'var(--surface)', borderRight: '1px solid var(--border)', height: '100vh', display: 'flex', flexDirection: 'column', flexShrink: 0, padding: '16px 12px' }}>
           <div style={{ padding: '4px 6px 20px', borderBottom: '1px solid var(--border)', marginBottom: '8px' }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--primary)', letterSpacing: '-1px' }}>🛒 KasirPro</div>
-            <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--primary)', letterSpacing: '-1px' }}>🛒 <span className="sidebar-brand-text">KasirPro</span></div>
+            <div className="sidebar-brand-text" style={{ fontSize: 11, color: 'var(--dim)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: online ? 'var(--success)' : 'var(--danger)', display: 'inline-block' }}></span>
               {online ? 'Online' : 'Offline'}
               {useFirebase && <span className="badge badge-info" style={{ fontSize: 10, marginLeft: 4 }}>FB</span>}
@@ -821,7 +1094,7 @@
             </div>
           </div>
           {queueCount > 0 && (
-            <div style={{
+            <div className="sidebar-brand-text" style={{
               padding: '8px', margin: '0 0 8px 0', background: 'rgba(239,68,68,.1)',
               border: '1px solid rgba(239,68,68,.3)', borderRadius: '8px', fontSize: 11, color: 'var(--danger)', textAlign: 'center'
             }}>
@@ -830,24 +1103,24 @@
           )}
           <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
             {VIEWS.map(v => canAccess(v) && (
-              <div key={v} className={`sidebar-item ${view === v ? 'active' : ''}`} onClick={() => setView(v)}>
+              <div key={v} className={`sidebar-item ${view === v ? 'active' : ''}`} onClick={() => setView(v)} title={VIEW_LABELS[v]}>
                 <span style={{ fontSize: 16 }}>{VIEW_ICONS[v]}</span>
-                <span>{VIEW_LABELS[v]}</span>
+                <span className="sidebar-label">{VIEW_LABELS[v]}</span>
               </div>
             ))}
           </nav>
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px', background: 'var(--card)', borderRadius: '8px', marginBottom: '8px' }}>
-              <div style={{ width: 32, height: 32, background: 'var(--primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#000' }}>
+              <div style={{ width: 32, height: 32, background: 'var(--primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#000', flexShrink: 0 }}>
                 {user.name[0]}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="sidebar-user-detail" style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.name}</div>
                 <span className="badge badge-info" style={{ fontSize: 10 }}>{user.role}</span>
               </div>
             </div>
-            <button className="btn btn-ghost" style={{ width: '100%', fontSize: 12 }} onClick={onLogout}>
-              <Icon name="logout" size={14} /> Keluar
+            <button className="btn btn-ghost" style={{ width: '100%', fontSize: 12 }} onClick={onLogout} title="Keluar">
+              <Icon name="logout" size={14} /> <span className="sidebar-label">Keluar</span>
             </button>
           </div>
         </div>
@@ -944,7 +1217,7 @@
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '16px', marginBottom: '24px' }}>
+          <div className="dash-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '16px', marginBottom: '24px' }}>
             {[
               { label: 'Omzet Hari Ini', val: fmt(todayRevenue), icon: '💵', color: 'var(--success)', sub: `${todayTx.length} transaksi` },
               { label: 'Keuntungan Bersih', val: fmt(todayProfit), icon: '📈', color: 'var(--primary)', sub: `Margin ${todayRevenue ? Math.round(todayProfit / todayRevenue * 100) : 0}%` },
@@ -964,7 +1237,7 @@
             ))}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px' }}>
+          <div className="dash-chart-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px' }}>
             <div className="card">
               <div style={{ fontWeight: 700, marginBottom: '16px', fontSize: 14 }}>Penjualan 7 Hari Terakhir</div>
               <div style={{ height: 200 }}><canvas ref={chartRef} /></div>
@@ -992,7 +1265,7 @@
                 <div style={{ fontWeight: 700, marginBottom: '12px', fontSize: 14, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Icon name="alert" size={16} color="var(--danger)" /> Stok Menipis
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px' }}>
+                <div className="dash-alert-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px' }}>
                   {lowStock.map(p => (
                     <div key={p.id} style={{ background: 'rgba(239,68,68,.05)', border: '1px solid rgba(239,68,68,.2)', borderRadius: '8px', padding: '10px' }}>
                       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: '4px' }}>{p.name}</div>
@@ -1008,7 +1281,7 @@
                 <div style={{ fontWeight: 700, marginBottom: '12px', fontSize: 14, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Icon name="alert" size={16} color="var(--danger)" /> Produk Kadaluarsa
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px' }}>
+                <div className="dash-alert-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px' }}>
                   {expired.map(p => (
                     <div key={p.id} style={{ background: 'rgba(239,68,68,.05)', border: '1px solid rgba(239,68,68,.2)', borderRadius: '8px', padding: '10px' }}>
                       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: '4px' }}>{p.name}</div>
@@ -1144,8 +1417,10 @@
         setShowPay(false);
       };
 
+      const [showCartDrawer, setShowCartDrawer] = useState(false);
+
       return (
-        <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+        <div className="pos-container" style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', overflow: 'hidden' }}>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <div style={{ flex: 1, position: 'relative' }}>
@@ -1165,7 +1440,7 @@
                 </button>
               ))}
             </div>
-            <div style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: '10px', alignContent: 'start' }}>
+            <div className="product-grid" style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: '10px', alignContent: 'start' }}>
               {filtered.map(p => (
                 <div key={p.id} onClick={() => addToCart(p)} style={{
                   background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '10px',
@@ -1188,7 +1463,8 @@
             </div>
           </div>
 
-          <div style={{ width: 320, background: 'var(--surface)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+          {/* Desktop cart panel */}
+          <div className="pos-right-panel" style={{ width: 320, background: 'var(--surface)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontWeight: 700, fontSize: 15 }}>🛒 Keranjang</div>
               {cart.length > 0 && <button className="btn btn-danger btn-sm" onClick={clearCart}>Kosongkan</button>}
@@ -1252,6 +1528,82 @@
                 <span className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--primary)' }}>{fmt(total)}</span>
               </div>
               <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => cart.length > 0 && setShowPay(true)} disabled={cart.length === 0}>
+                💳 Bayar Sekarang
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile FAB cart button */}
+          <button className="pos-cart-fab" onClick={() => setShowCartDrawer(true)}>
+            🛒 {cart.length > 0 ? `${cart.reduce((s, i) => s + i.qty, 0)} item — ${fmt(total)}` : 'Keranjang'}
+            {cart.length > 0 && <span style={{ background: 'rgba(0,0,0,.2)', borderRadius: '50%', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>{cart.reduce((s, i) => s + i.qty, 0)}</span>}
+          </button>
+
+          {/* Mobile cart drawer */}
+          {showCartDrawer && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 79 }} onClick={() => setShowCartDrawer(false)} />
+          )}
+          <div className={`pos-cart-drawer ${showCartDrawer ? 'open' : ''}`}>
+            <div className="drawer-handle" />
+            <div style={{ padding: '0 16px 12px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>🛒 Keranjang ({cart.reduce((s, i) => s + i.qty, 0)} item)</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {cart.length > 0 && <button className="btn btn-danger btn-sm" onClick={clearCart}>Kosongkan</button>}
+                <button onClick={() => setShowCartDrawer(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}><Icon name="x" size={20} /></button>
+              </div>
+            </div>
+            {selMember && (
+              <div style={{ padding: '10px 16px', background: 'rgba(59,130,246,.1)', borderBottom: '1px solid rgba(59,130,246,.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--info)', fontWeight: 600 }}>👤 Member</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{selMember.name} — Diskon 2%</div>
+                </div>
+                <button onClick={() => setSelMember(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}><Icon name="x" size={14} /></button>
+              </div>
+            )}
+            <div style={{ flex: 1, overflow: 'auto', padding: '8px 16px' }}>
+              {cart.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--dim)' }}>
+                  <div style={{ fontSize: 40, marginBottom: '8px' }}>🛒</div>
+                  <p style={{ fontSize: 13 }}>Keranjang masih kosong</p>
+                </div>
+              )}
+              {cart.map(item => (
+                <div key={item.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{item.name}</div>
+                    <div className="mono" style={{ fontSize: 13, color: 'var(--primary)', fontWeight: 700 }}>{fmt(item.price * item.qty)}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button onClick={() => updateQty(item.id, item.qty - 1)} style={{ width: 28, height: 28, border: '1px solid var(--border2)', background: 'var(--card2)', borderRadius: 6, cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="minus" size={13} />
+                    </button>
+                    <span className="mono" style={{ fontSize: 16, fontWeight: 700, minWidth: 28, textAlign: 'center' }}>{item.qty}</span>
+                    <button onClick={() => updateQty(item.id, item.qty + 1)} style={{ width: 28, height: 28, border: '1px solid var(--border2)', background: 'var(--card2)', borderRadius: 6, cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="plus" size={13} />
+                    </button>
+                    <button onClick={() => removeFromCart(item.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }}>
+                      <Icon name="trash" size={14} color="var(--danger)" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: 12, color: 'var(--muted)' }}>
+                <span>Subtotal</span><span className="mono">{fmt(subtotal)}</span>
+              </div>
+              {discount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: 12, color: 'var(--success)' }}>
+                  <span>Diskon Member (2%)</span><span className="mono">- {fmt(discount)}</span>
+                </div>
+              )}
+              <hr className="divider" />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <span style={{ fontWeight: 700, fontSize: 16 }}>TOTAL</span>
+                <span className="mono" style={{ fontSize: 22, fontWeight: 800, color: 'var(--primary)' }}>{fmt(total)}</span>
+              </div>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%', fontSize: 16 }} onClick={() => { cart.length > 0 && setShowPay(true); setShowCartDrawer(false); }} disabled={cart.length === 0}>
                 💳 Bayar Sekarang
               </button>
             </div>
@@ -1446,7 +1798,7 @@
               ))}
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
+          <div className="stat-grid-5" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
             {[
               { l: 'Total Produk', v: products.length, c: 'var(--info)' },
               { l: 'Stok Menipis', v: products.filter(p => p.stock <= p.minStock).length, c: 'var(--warn)' },
@@ -2691,7 +3043,7 @@
               <Sidebar view={view} setView={setView} user={user} online={online} onLogout={() => { setUser(null); addToast('Berhasil keluar', 'var(--muted)', '👋'); }} />
             </div>
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ flex: 1, overflow: 'hidden' }}>
+              <div className="main-content" style={{ flex: 1, overflow: 'hidden' }}>
                 {view === 'dashboard' && <Dashboard />}
                 {view === 'pos' && (user.role === 'admin' || user.role === 'kasir' ? <POSTerminal /> : <div style={{ padding: '40px', textAlign: 'center', color: 'var(--muted)' }}>Akses ditolak</div>)}
                 {view === 'produk' && (user.role === 'admin' || user.role === 'supervisor' ? <ProductsView /> : <div style={{ padding: '40px', textAlign: 'center', color: 'var(--muted)' }}>Akses ditolak</div>)}
@@ -2703,6 +3055,7 @@
               </div>
             </div>
           </div>
+          <MobileNav view={view} setView={setView} user={user} />
           <Toast toasts={toasts} />
         </AppCtx.Provider>
       );
