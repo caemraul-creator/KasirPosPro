@@ -4,17 +4,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KasirPro — Point of Sale System</title>
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <title>KasirPro — Point of Sale System v3</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js">
+  </script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js">
+  </script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js">
+  </script>
+  <script src="https://cdn.tailwindcss.com">
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js">
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
+  </script>
   <!-- Firebase -->
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js">
+  </script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js">
+  </script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js">
+  </script>
   <link
     href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
     rel="stylesheet">
@@ -422,15 +431,147 @@
     const CATEGORIES = ['Makanan', 'Minuman', 'Snack', 'Kebersihan', 'Kesehatan', 'Lainnya'];
 
     // ═══════════════════════════════════════════════════
-    // STORAGE LAYER (localStorage + optional Firebase sync)
+    // ENCRYPTION HELPERS
     // ═══════════════════════════════════════════════════
-    const LS = {
-      get: (k, def) => { try { const v = localStorage.getItem('kp_' + k); return v ? JSON.parse(v) : def; } catch { return def; } },
-      set: (k, v) => { try { localStorage.setItem('kp_' + k, JSON.stringify(v)); } catch { } },
+    const encryptData = (data) => {
+      try {
+        const jsonStr = JSON.stringify(data);
+        let encrypted = '';
+        for (let i = 0; i < jsonStr.length; i++) {
+          const charCode = jsonStr.charCodeAt(i) ^ APP_SECRET.charCodeAt(i % APP_SECRET.length);
+          encrypted += String.fromCharCode(charCode);
+        }
+        return btoa(encrypted);
+      } catch (e) {
+        return JSON.stringify(data);
+      }
     };
 
-    // Initialize Firebase (safely)
-    let db = null, fbAuth = null, useFirebase = false;
+    const decryptData = (encryptedData) => {
+      try {
+        const decoded = atob(encryptedData);
+        let decrypted = '';
+        for (let i = 0; i < decoded.length; i++) {
+          const charCode = decoded.charCodeAt(i) ^ APP_SECRET.charCodeAt(i % APP_SECRET.length);
+          decrypted += String.fromCharCode(charCode);
+        }
+        return JSON.parse(decrypted);
+      } catch (e) {
+        try {
+          return JSON.parse(encryptedData);
+        } catch {
+          return null;
+        }
+      }
+    };
+
+    const hashPin = (pin) => {
+      let hash = 0;
+      const salt = 'KasirPro2024';
+      const combined = pin + salt;
+      for (let i = 0; i < combined.length; i++) {
+        const char = combined.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+      }
+      return Math.abs(hash).toString(16).padStart(8, '0');
+    };
+
+    const verifyPin = (inputPin, storedHash) => {
+      return hashPin(inputPin) === storedHash;
+    };
+
+    // ═══════════════════════════════════════════════════
+    // STORAGE LAYER (with encryption & limits)
+    // ═══════════════════════════════════════════════════
+    const STORAGE_LIMITS = {
+      maxTransactions: 500,
+      maxOfflineQueue: 50,
+    };
+
+    const LS = {
+      get: (k, def) => {
+        try {
+          const v = localStorage.getItem('kp_' + k);
+          if (!v) return def;
+          if (['users'].includes(k)) {
+            const decrypted = decryptData(v);
+            return decrypted !== null ? decrypted : def;
+          }
+          return JSON.parse(v);
+        } catch {
+          return def;
+        }
+      },
+      set: (k, v) => {
+        try {
+          let dataToStore = v;
+          if (['users'].includes(k)) {
+            dataToStore = encryptData(v);
+            localStorage.setItem('kp_' + k, dataToStore);
+          } else if (k === 'transactions') {
+            const limited = Array.isArray(v) ? v.slice(0, STORAGE_LIMITS.maxTransactions) : v;
+            localStorage.setItem('kp_' + k, JSON.stringify(limited));
+          } else {
+            localStorage.setItem('kp_' + k, JSON.stringify(v));
+          }
+        } catch (e) {
+          console.warn('Gagal menyimpan ke localStorage:', e);
+        }
+      },
+    };
+
+    // ═══════════════════════════════════════════════════
+    // OFFLINE QUEUE SYSTEM
+    // ═══════════════════════════════════════════════════
+    const OfflineQueue = {
+      get: () => {
+        try {
+          const q = localStorage.getItem('kp_offline_queue');
+          return q ? JSON.parse(q) : [];
+        } catch { return []; }
+      },
+      add: (action, payload) => {
+        const queue = OfflineQueue.get();
+        if (queue.length >= STORAGE_LIMITS.maxOfflineQueue) {
+          console.warn('Antrean offline penuh!');
+          return false;
+        }
+        queue.push({ action, payload, timestamp: Date.now() });
+        localStorage.setItem('kp_offline_queue', JSON.stringify(queue));
+        return true;
+      },
+      remove: (index) => {
+        const queue = OfflineQueue.get();
+        queue.splice(index, 1);
+        localStorage.setItem('kp_offline_queue', JSON.stringify(queue));
+      },
+      process: async () => {
+        const queue = OfflineQueue.get();
+        if (queue.length === 0) return;
+
+        console.log(`Memproses ${queue.length} antrean offline...`);
+
+        for (let i = queue.length - 1; i >= 0; i--) {
+          const item = queue[i];
+          try {
+            await syncToGoogleSheets(item.action, item.payload);
+            OfflineQueue.remove(i);
+          } catch (e) {
+            console.error(`Gagal memproses antrean: ${item.action}`, e);
+            break;
+          }
+        }
+      },
+      getCount: () => OfflineQueue.get().length,
+    };
+
+    // ═══════════════════════════════════════════════════
+    // FIREBASE INIT
+    // ═══════════════════════════════════════════════════
+    let db = null,
+      fbAuth = null,
+      useFirebase = false;
     try {
       if (!FIREBASE_CONFIG.apiKey.startsWith('GANTI')) {
         firebase.initializeApp(FIREBASE_CONFIG);
@@ -489,31 +630,117 @@
         chart: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>,
         refresh: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>,
         eye: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>,
+        box: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>,
+        package: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21" /><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>,
       };
       return icons[name] || null;
     };
 
     // ═══════════════════════════════════════════════════
-    // LOGIN SCREEN
+    // LOGIN SCREEN (with PIN hash & mandatory change)
     // ═══════════════════════════════════════════════════
     function LoginScreen({ onLogin }) {
       const [pin, setPin] = useState('');
       const [err, setErr] = useState('');
-      const [users] = useState(() => LS.get('users', USERS));
+      const [users, setUsersState] = useState(() => {
+        const storedUsers = LS.get('users', USERS);
+        // Convert legacy PIN to hash if needed
+        return storedUsers.map(u => {
+          if (!u.pinHash && u.pin) {
+            return { ...u, pinHash: hashPin(u.pin), mustChangePin: true };
+          }
+          return u;
+        });
+      });
       const [selUser, setSelUser] = useState(users[0]?.id || '');
+      const [showChangePin, setShowChangePin] = useState(false);
+      const [newPin, setNewPin] = useState('');
 
-      const handleLogin = async () => {
+      const handleLogin = () => {
         const u = users.find(u => u.id === selUser);
         if (!u) return setErr('Pilih user terlebih dahulu');
-        if (u.pin !== pin) return setErr('PIN salah');
+
+        // Support both legacy PIN and hashed PIN
+        const isValid = u.pinHash ? verifyPin(pin, u.pinHash) : (u.pin === pin);
+        if (!isValid) return setErr('PIN salah');
+
         setErr('');
+
+        // Cek apakah wajib ganti PIN
+        if (u.mustChangePin) {
+          setShowChangePin(true);
+          return;
+        }
+
+        doLogin(u);
+      };
+
+      const doLogin = async (u) => {
         try {
           if (useFirebase && fbAuth) await fbAuth.signInAnonymously();
         } catch (e) { console.warn('Firebase Auth gagal, lanjut mode lokal:', e); }
+
+        // Kirim secret key ke Apps Script
+        syncToGoogleSheets('REGISTER_SECRET', {
+          secret: APP_SECRET,
+          userId: u.id,
+          timestamp: Date.now()
+        });
+
         onLogin(u);
       };
 
+      const handleChangePin = () => {
+        if (newPin.length < 4 || newPin.length > 6) {
+          return setErr('PIN harus 4-6 digit');
+        }
+
+        const updatedUsers = users.map(u => {
+          if (u.id === selUser) {
+            const { pin, ...rest } = u;
+            return { ...rest, pinHash: hashPin(newPin), mustChangePin: false };
+          }
+          return u;
+        });
+
+        setUsersState(updatedUsers);
+        LS.set('users', updatedUsers);
+        setShowChangePin(false);
+
+        const updatedUser = updatedUsers.find(u => u.id === selUser);
+        doLogin(updatedUser);
+      };
+
       const numPad = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
+
+      if (showChangePin) {
+        return (
+          <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+            <div className="card" style={{ padding: '28px', maxWidth: 380, width: '100%' }}>
+              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <div style={{ fontSize: 36, marginBottom: '8px' }}>🔒</div>
+                <h3 style={{ fontWeight: 700, fontSize: 18 }}>Ganti PIN Wajib</h3>
+                <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: '4px' }}>
+                  Demi keamanan, Anda harus mengganti PIN default.
+                </p>
+              </div>
+              <div className="label">PIN Baru (4-6 digit)</div>
+              <input
+                className="input mono"
+                type="password"
+                value={newPin}
+                onChange={e => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Masukkan PIN baru"
+                style={{ fontSize: 18, textAlign: 'center', letterSpacing: '8px', marginBottom: '16px' }}
+              />
+              {err && <p style={{ color: 'var(--danger)', fontSize: 12, marginBottom: '12px', textAlign: 'center' }}>{err}</p>}
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={handleChangePin}>
+                Simpan PIN Baru
+              </button>
+            </div>
+          </div>
+        );
+      }
 
       return (
         <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: '20px' }}>
@@ -521,7 +748,7 @@
             <div style={{ textAlign: 'center', marginBottom: '32px' }}>
               <div style={{ fontSize: 48, marginBottom: '8px' }}>🛒</div>
               <h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)', letterSpacing: '-1px' }}>KasirPro</h1>
-              <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: '4px' }}>Point of Sale System</p>
+              <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: '4px' }}>Point of Sale System v3</p>
             </div>
             <div className="card" style={{ padding: '28px' }}>
               <div style={{ marginBottom: '20px' }}>
@@ -560,21 +787,26 @@
                 <span className="badge badge-warn">⚠️ Mode Lokal — Konfigurasi Firebase di Pengaturan</span>
               </div>
             )}
-
+            {OfflineQueue.getCount() > 0 && (
+              <div style={{ marginTop: '12px', textAlign: 'center' }}>
+                <span className="badge badge-danger">📤 {OfflineQueue.getCount()} data offline menunggu sinkronisasi</span>
+              </div>
+            )}
           </div>
         </div>
       );
     }
 
     // ═══════════════════════════════════════════════════
-    // SIDEBAR
+    // SIDEBAR (with offline indicator)
     // ═══════════════════════════════════════════════════
     function Sidebar({ view, setView, user, onLogout, online }) {
+      const queueCount = OfflineQueue.getCount();
       const canAccess = (v) => {
-        if (v === 'dashboard') return true; // Semua bisa lihat dashboard
-        if (user.role === 'admin') return true; // Admin bisa akses semua
-        if (user.role === 'kasir') return ['pos', 'member', 'hutang'].includes(v); // Kasir akses kasir, member, dan hutang (untuk terima bayaran)
-        if (user.role === 'supervisor') return ['produk'].includes(v); // Supervisor khusus gudang/produk
+        if (v === 'dashboard') return true;
+        if (user.role === 'admin') return true;
+        if (user.role === 'kasir') return ['pos', 'member', 'hutang'].includes(v);
+        if (user.role === 'supervisor') return ['produk'].includes(v);
         return false;
       };
       return (
@@ -584,9 +816,18 @@
             <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: online ? 'var(--success)' : 'var(--danger)', display: 'inline-block' }}></span>
               {online ? 'Online' : 'Offline'}
-              {useFirebase && <span className="badge badge-info" style={{ fontSize: 10, marginLeft: 4 }}>Firebase</span>}
+              {useFirebase && <span className="badge badge-info" style={{ fontSize: 10, marginLeft: 4 }}>FB</span>}
+              {queueCount > 0 && <span className="badge badge-danger" style={{ fontSize: 10, marginLeft: 4 }}>{queueCount}</span>}
             </div>
           </div>
+          {queueCount > 0 && (
+            <div style={{
+              padding: '8px', margin: '0 0 8px 0', background: 'rgba(239,68,68,.1)',
+              border: '1px solid rgba(239,68,68,.3)', borderRadius: '8px', fontSize: 11, color: 'var(--danger)', textAlign: 'center'
+            }}>
+              ⚠️ {queueCount} data offline belum terkirim
+            </div>
+          )}
           <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
             {VIEWS.map(v => canAccess(v) && (
               <div key={v} className={`sidebar-item ${view === v ? 'active' : ''}`} onClick={() => setView(v)}>
@@ -633,7 +874,6 @@
       const lowStock = products.filter(p => p.stock <= p.minStock);
       const expired = products.filter(p => p.expiryDate && p.expiryDate < today());
 
-      // Last 7 days revenue
       const last7 = useMemo(() => {
         const days = [];
         for (let i = 6; i >= 0; i--) {
@@ -704,7 +944,6 @@
             </div>
           </div>
 
-          {/* Stat Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '16px', marginBottom: '24px' }}>
             {[
               { label: 'Omzet Hari Ini', val: fmt(todayRevenue), icon: '💵', color: 'var(--success)', sub: `${todayTx.length} transaksi` },
@@ -726,12 +965,10 @@
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px' }}>
-            {/* Sales Chart */}
             <div className="card">
               <div style={{ fontWeight: 700, marginBottom: '16px', fontSize: 14 }}>Penjualan 7 Hari Terakhir</div>
               <div style={{ height: 200 }}><canvas ref={chartRef} /></div>
             </div>
-            {/* Top Products */}
             <div className="card">
               <div style={{ fontWeight: 700, marginBottom: '16px', fontSize: 14 }}>Produk Terlaris</div>
               {topProducts.length === 0 && <p style={{ color: 'var(--dim)', fontSize: 12 }}>Belum ada data transaksi</p>}
@@ -749,7 +986,6 @@
             </div>
           </div>
 
-          {/* Alerts */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {lowStock.length > 0 && (
               <div className="card" style={{ borderColor: 'rgba(239,68,68,.3)' }}>
@@ -789,7 +1025,7 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // POS TERMINAL
+    // POS TERMINAL (with stock validation)
     // ═══════════════════════════════════════════════════
     function POSTerminal() {
       const { products, setProducts, addTransaction, members, user, addDebt, addToast } = useApp();
@@ -838,9 +1074,78 @@
         if (p) { addToCart(p); setSearch(''); }
       };
 
+      const handleCheckout = async (method, paid, notes) => {
+        // Validasi stok real-time
+        const stockErrors = [];
+        for (const item of cart) {
+          const currentProduct = products.find(p => p.id === item.id);
+          if (!currentProduct) {
+            stockErrors.push(`Produk "${item.name}" sudah dihapus`);
+          } else if (currentProduct.stock < item.qty) {
+            stockErrors.push(`Stok "${item.name}" tidak cukup (tersedia: ${currentProduct.stock})`);
+          } else if (currentProduct.expiryDate && currentProduct.expiryDate < today()) {
+            stockErrors.push(`"${item.name}" sudah kadaluarsa`);
+          }
+        }
+
+        if (stockErrors.length > 0) {
+          addToast(stockErrors.join('. '), 'var(--danger)', '❌', 'Gagal Checkout');
+          return;
+        }
+
+        // Hitung keuntungan per transaksi
+        const rawProfit = cart.reduce((s, i) => s + ((i.price || 0) - (i.cost || 0)) * i.qty, 0);
+        const txProfit = Math.max(0, rawProfit - discount);
+        const txMargin = total > 0 ? Math.round(txProfit / total * 100) : 0;
+
+        const tx = {
+          id: uid(), date: today(), time: new Date().toISOString(),
+          items: cart.map(i => ({ ...i, cost: i.cost || 0 })),
+          subtotal, discount, total, method, paid, change: Math.max(0, paid - total),
+          profit: txProfit, margin: txMargin,
+          memberId: selMember?.id, memberName: selMember?.name,
+          cashier: user.name, outlet: user.outlet, notes
+        };
+
+        // Update stock
+        const updatedProducts = products.map(p => {
+          const ci = cart.find(c => c.id === p.id);
+          return ci ? { ...p, stock: Math.max(0, p.stock - ci.qty) } : p;
+        });
+        setProducts(updatedProducts);
+
+        // Tambahkan transaksi
+        const success = await addTransaction(tx);
+        if (!success) return;
+
+        // Handle debt
+        if (method === 'Hutang' && selMember) {
+          addDebt({
+            id: uid(), memberId: selMember.id, memberName: selMember.name,
+            amount: total, txId: tx.id, date: today(),
+            dueDate: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+            paid: false, notes
+          });
+        }
+
+        // Update member points
+        if (selMember && method !== 'Hutang') {
+          const pointsEarned = Math.floor(total / 1000);
+          if (pointsEarned > 0) {
+            const updatedMember = { ...selMember, points: (selMember.points || 0) + pointsEarned };
+            setMembers(prev => prev.map(m => m.id === selMember.id ? updatedMember : m));
+            syncToGoogleSheets('UPDATE_MEMBER', updatedMember);
+            addToast(`+${pointsEarned} poin untuk ${selMember.name}`, 'var(--info)', '⭐');
+          }
+        }
+
+        addToast(`Transaksi berhasil! ${fmt(total)}`, 'var(--success)', '✅', 'Pembayaran Diterima');
+        clearCart();
+        setShowPay(false);
+      };
+
       return (
         <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-          {/* Left: Product Grid */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', overflow: 'hidden' }}>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <div style={{ flex: 1, position: 'relative' }}>
@@ -883,7 +1188,6 @@
             </div>
           </div>
 
-          {/* Right: Cart */}
           <div style={{ width: 320, background: 'var(--surface)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontWeight: 700, fontSize: 15 }}>🛒 Keranjang</div>
@@ -931,7 +1235,6 @@
                 </div>
               ))}
             </div>
-            {/* Cart Summary */}
             <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: 12, color: 'var(--muted)' }}>
                 <span>Subtotal ({cart.reduce((s, i) => s + i.qty, 0)} item)</span>
@@ -954,53 +1257,14 @@
             </div>
           </div>
 
-          {/* Member Search Modal */}
           {showMemberSearch && (
             <MemberSearchModal members={members} onSelect={m => { setSelMember(m); setShowMemberSearch(false); }} onClose={() => setShowMemberSearch(false)} />
           )}
 
-          {/* Payment Modal */}
           {showPay && (
             <PaymentModal total={total} cart={cart} member={selMember} discount={discount}
               onClose={() => setShowPay(false)}
-              onConfirm={(method, paid, notes) => {
-                // Hitung keuntungan per transaksi
-                const rawProfit = cart.reduce((s, i) => s + ((i.price || 0) - (i.cost || 0)) * i.qty, 0);
-                const txProfit = Math.max(0, rawProfit - discount);
-                const txMargin = total > 0 ? Math.round(txProfit / total * 100) : 0;
-                const tx = {
-                  id: uid(), date: today(), time: new Date().toISOString(),
-                  items: cart.map(i => ({ ...i, cost: i.cost || 0 })),
-                  subtotal, discount, total, method, paid, change: Math.max(0, paid - total),
-                  profit: txProfit, margin: txMargin,
-                  memberId: selMember?.id, memberName: selMember?.name,
-                  cashier: user.name, outlet: user.outlet, notes
-                };
-                // Update stock
-                const updatedProducts = products.map(p => {
-                  const ci = cart.find(c => c.id === p.id);
-                  return ci ? { ...p, stock: Math.max(0, p.stock - ci.qty) } : p;
-                });
-                setProducts(updatedProducts);
-                addTransaction(tx);
-                // Handle debt
-                if (method === 'Hutang' && selMember) {
-                  addDebt({ id: uid(), memberId: selMember.id, memberName: selMember.name, amount: total, txId: tx.id, date: today(), dueDate: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0], paid: false, notes });
-                }
-                // Update member points (1 poin per Rp 1.000 belanja)
-                if (selMember && method !== 'Hutang') {
-                  const pointsEarned = Math.floor(total / 1000);
-                  if (pointsEarned > 0) {
-                    const updatedMember = { ...selMember, points: (selMember.points || 0) + pointsEarned };
-                    setMembers(prev => prev.map(m => m.id === selMember.id ? updatedMember : m));
-                    syncToGoogleSheets('UPDATE_MEMBER', updatedMember);
-                    addToast(`+${pointsEarned} poin untuk ${selMember.name}`, 'var(--info)', '⭐');
-                  }
-                }
-                addToast(`Transaksi berhasil! ${fmt(total)}`, 'var(--success)', '✅', 'Pembayaran Diterima');
-                clearCart();
-                setShowPay(false);
-              }}
+              onConfirm={handleCheckout}
             />
           )}
         </div>
@@ -1057,7 +1321,6 @@
                 <h3 style={{ fontWeight: 700, fontSize: 16 }}>💳 Pembayaran</h3>
                 <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}><Icon name="x" size={18} /></button>
               </div>
-              {/* Items summary */}
               <div style={{ background: 'var(--card2)', borderRadius: '8px', padding: '12px', marginBottom: '16px', maxHeight: 140, overflow: 'auto' }}>
                 {cart.map(i => (
                   <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: '4px' }}>
@@ -1075,7 +1338,6 @@
                 <span style={{ fontWeight: 700 }}>TOTAL</span>
                 <span className="mono" style={{ fontSize: 22, fontWeight: 800, color: 'var(--primary)' }}>{fmt(total)}</span>
               </div>
-              {/* Payment Method */}
               <div className="label">Metode Pembayaran</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: '16px' }}>
                 {PAY_METHODS.map(m => (
@@ -1085,7 +1347,6 @@
                   }}>{m}</button>
                 ))}
               </div>
-              {/* Debt warning */}
               {method === 'Hutang' && !member && (
                 <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: '8px', padding: '10px', marginBottom: '12px', fontSize: 12, color: 'var(--danger)' }}>
                   ⚠️ Hutang hanya bisa dipilih jika ada member. Silakan pilih member terlebih dahulu.
@@ -1132,14 +1393,15 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // PRODUCTS MANAGEMENT
+    // PRODUCTS MANAGEMENT (with Stock In)
     // ═══════════════════════════════════════════════════
     function ProductsView() {
-      const { products, setProducts, addToast } = useApp();
+      const { products, setProducts, addToast, user } = useApp();
       const [search, setSearch] = useState('');
       const [showForm, setShowForm] = useState(false);
       const [editItem, setEditItem] = useState(null);
       const [catFilter, setCatFilter] = useState('Semua');
+      const [showStockIn, setShowStockIn] = useState(null);
 
       const cats = ['Semua', ...CATEGORIES];
       const filtered = products.filter(p => {
@@ -1184,7 +1446,6 @@
               ))}
             </div>
           </div>
-          {/* Summary */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
             {[
               { l: 'Total Produk', v: products.length, c: 'var(--info)' },
@@ -1199,7 +1460,6 @@
               </div>
             ))}
           </div>
-          {/* Table */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1235,6 +1495,9 @@
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn btn-success btn-sm" onClick={() => setShowStockIn(p)} title="Tambah Stok">
+                            <Icon name="box" size={12} />
+                          </button>
                           <button className="btn btn-ghost btn-sm" onClick={() => { setEditItem(p); setShowForm(true); }}><Icon name="edit" size={12} /></button>
                           <button className="btn btn-danger btn-sm" onClick={() => deleteProduct(p.id)}><Icon name="trash" size={12} /></button>
                         </div>
@@ -1259,6 +1522,90 @@
             setShowForm(false);
             addToast(editItem ? 'Produk diperbarui' : 'Produk ditambahkan', 'var(--success)', '✅');
           }} />}
+          {showStockIn && (
+            <StockInModal
+              product={showStockIn}
+              onClose={() => setShowStockIn(null)}
+              onSave={(productId, qty, notes) => {
+                const updated = products.map(p =>
+                  p.id === productId ? { ...p, stock: p.stock + qty } : p
+                );
+                setProducts(updated);
+
+                const stockRecord = {
+                  id: uid(),
+                  productId,
+                  productName: showStockIn.name,
+                  qty,
+                  notes,
+                  date: today(),
+                  time: new Date().toISOString(),
+                  by: user.name,
+                  stockBefore: showStockIn.stock,
+                  stockAfter: showStockIn.stock + qty
+                };
+                syncToGoogleSheets('STOCK_IN', stockRecord);
+
+                addToast(`Stok ${showStockIn.name} bertambah ${qty}`, 'var(--success)', '📦');
+                setShowStockIn(null);
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    function StockInModal({ product, onClose, onSave }) {
+      const [qty, setQty] = useState(1);
+      const [notes, setNotes] = useState('');
+
+      return (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 400 }}>
+            <div style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <h3 style={{ fontWeight: 700 }}>📦 Tambah Stok</h3>
+                <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}><Icon name="x" size={18} /></button>
+              </div>
+              <div style={{ background: 'var(--card2)', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
+                <div style={{ fontWeight: 600 }}>{product.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Stok saat ini: <strong>{product.stock}</strong> | Min: {product.minStock}
+                </div>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <div className="label">Jumlah Tambah</div>
+                <input
+                  className="input mono"
+                  type="number"
+                  value={qty}
+                  onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))}
+                  style={{ fontSize: 18, fontWeight: 700 }}
+                />
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div className="label">Stok Setelah Penambahan</div>
+                <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--success)', padding: '8px', background: 'var(--card2)', borderRadius: '6px', textAlign: 'center' }}>
+                  {product.stock + qty} unit
+                </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <div className="label">Catatan (opsional)</div>
+                <input
+                  className="input"
+                  placeholder="Supplier, nomor faktur, dll..."
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button className="btn btn-ghost" onClick={onClose}>Batal</button>
+                <button className="btn btn-primary" onClick={() => onSave(product.id, qty, notes)}>
+                  <Icon name="check" size={14} /> Tambah {qty} Stok
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       );
     }
@@ -1823,7 +2170,7 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // FINANCE (AMBIL KEUNTUNGAN)
+    // FINANCE
     // ═══════════════════════════════════════════════════
     function FinanceView() {
       const { transactions, dailyProfits, setDailyProfits, user, addToast } = useApp();
@@ -1849,7 +2196,6 @@
           }
           return [...prev, { date: today(), revenue: todayRevenue, cost: todayCost, profit: todayProfit, withdrawn: amount, withdrawals: [entry] }];
         });
-        // ✅ Sync ke Google Sheets — sheet "Keuntungan"
         syncToGoogleSheets('WITHDRAW_PROFIT', {
           id: entry.id,
           date: today(),
@@ -1860,7 +2206,6 @@
           todayRevenue,
           todayCost,
           todayProfit,
-          availableBefore: available,
         });
         addToast(`Penarikan ${fmt(amount)} berhasil!`, 'var(--success)', '💰', 'Ambil Keuntungan');
         setShowWithdraw(false);
@@ -1880,10 +2225,6 @@
         return days;
       }, [transactions, dailyProfits]);
 
-      const totalRevenue30 = last30.reduce((s, d) => s + d.revenue, 0);
-      const totalProfit30 = last30.reduce((s, d) => s + d.profit, 0);
-      const totalWithdrawn30 = last30.reduce((s, d) => s + d.withdrawn, 0);
-
       return (
         <div style={{ padding: '24px', overflowY: 'auto', height: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -1893,10 +2234,8 @@
               const allWithdrawals = dailyProfits.filter(d => d.withdrawals?.length > 0).flatMap(d =>
                 (d.withdrawals || []).map(w => ({
                   ID: w.id, Tanggal: w.date || d.date, Waktu: fmtDateTime(w.time),
-                  'Jumlah Ditarik (Rp)': w.amount,
-                  'Omzet Hari Itu (Rp)': d.revenue || 0,
-                  'HPP Hari Itu (Rp)': d.cost || 0,
-                  'Laba Hari Itu (Rp)': d.profit || 0,
+                  'Jumlah Ditarik (Rp)': w.amount, 'Omzet Hari Itu (Rp)': d.revenue || 0,
+                  'HPP Hari Itu (Rp)': d.cost || 0, 'Laba Hari Itu (Rp)': d.profit || 0,
                   Catatan: w.notes || '-', Oleh: w.by
                 }))
               );
@@ -1906,7 +2245,6 @@
             </button>
           </div>
 
-          {/* Today's finance */}
           <div style={{ background: 'linear-gradient(135deg,rgba(245,158,11,.15) 0%,rgba(249,115,22,.1) 100%)', border: '1px solid rgba(245,158,11,.3)', borderRadius: '16px', padding: '24px', marginBottom: '20px' }}>
             <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: '16px' }}>Keuntungan Hari Ini — {fmtDate(today())}</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16 }}>
@@ -1934,76 +2272,6 @@
                 </button>
               )}
             </div>
-          </div>
-
-          {/* 30 day summary */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
-            {[
-              { l: 'Total Omzet 30 Hari', v: fmt(totalRevenue30), c: 'var(--success)' },
-              { l: 'Total Laba 30 Hari', v: fmt(totalProfit30), c: 'var(--primary)' },
-              { l: 'Total Ditarik 30 Hari', v: fmt(totalWithdrawn30), c: 'var(--warn)' },
-              { l: 'Sisa Belum Ditarik', v: fmt(Math.max(0, totalProfit30 - totalWithdrawn30)), c: 'var(--info)' },
-            ].map((s, i) => (
-              <div key={i} className="stat-card">
-                <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>{s.l}</div>
-                <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: s.c }}>{s.v}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* 30-day table */}
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: '12px' }}>📅 Riwayat Laba 30 Hari Terakhir</div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: 'var(--card2)', borderBottom: '1px solid var(--border)' }}>
-                    {['Tanggal', 'Omzet', 'HPP', 'Laba', 'Margin', 'Ditarik', 'Sisa'].map(h => (
-                      <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '.5px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {last30.filter(d => d.revenue > 0 || d.withdrawn > 0).reverse().map(d => {
-                    const margin = d.revenue > 0 ? Math.round(d.profit / d.revenue * 100) : 0;
-                    const sisa = Math.max(0, d.profit - d.withdrawn);
-                    return (
-                      <tr key={d.date} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600 }}>{fmtDate(d.date)}</td>
-                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: 'var(--success)' }}>{fmt(d.revenue)}</span></td>
-                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: 'var(--warn)' }}>{fmt(d.cost)}</span></td>
-                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 700 }}>{fmt(d.profit)}</span></td>
-                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: margin >= 20 ? 'var(--success)' : 'var(--warn)' }}>{margin}%</span></td>
-                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: d.withdrawn > 0 ? 'var(--info)' : 'var(--dim)' }}>{d.withdrawn > 0 ? fmt(d.withdrawn) : '-'}</span></td>
-                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: sisa > 0 ? 'var(--success)' : 'var(--dim)' }}>{sisa > 0 ? fmt(sisa) : '-'}</span></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {last30.every(d => d.revenue === 0 && d.withdrawn === 0) && (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Belum ada data keuangan</div>
-              )}
-            </div>
-          </div>
-
-          {/* Withdrawal history */}
-          <div className="card">
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: '12px' }}>Log Penarikan Keuntungan</div>
-            {dailyProfits.filter(d => d.withdrawals?.length > 0).flatMap(d => d.withdrawals).length === 0 && (
-              <p style={{ color: 'var(--dim)', fontSize: 12, textAlign: 'center', padding: '20px' }}>Belum ada penarikan</p>
-            )}
-            {dailyProfits.filter(d => d.withdrawals?.length > 0).reverse().flatMap(d =>
-              (d.withdrawals || []).map(w => (
-                <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'var(--card2)', borderRadius: '8px', marginBottom: '6px' }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>Penarikan oleh {w.by}</div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtDateTime(w.time)} {w.notes && `— ${w.notes}`}</div>
-                  </div>
-                  <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: 'var(--primary)' }}>{fmt(w.amount)}</span>
-                </div>
-              ))
-            )}
           </div>
 
           {showWithdraw && (
@@ -2046,7 +2314,7 @@
             <button className="btn btn-ghost" onClick={onCancel}>Batal</button>
             <button className="btn btn-primary" onClick={() => {
               const users = LS.get('users', USERS);
-              const admin = users.find(u => u.role === 'admin' && u.pin === pin);
+              const admin = users.find(u => u.role === 'admin' && (verifyPin(pin, u.pinHash) || u.pin === pin));
               if (!admin) return alert('PIN admin salah!');
               onConfirm(amount, notes);
             }}>
@@ -2093,7 +2361,7 @@
                       <div style={{ width: 36, height: 36, background: 'var(--primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: '#000' }}>{u.name[0]}</div>
                       <div>
                         <div style={{ fontWeight: 600 }}>{u.name}</div>
-                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>{u.email} | Outlet: {u.outlet}</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>{u.email || '-'} | Outlet: {u.outlet}</div>
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2104,7 +2372,7 @@
                   </div>
                 ))}
               </div>
-              {showUserForm && <UserForm item={editUser} onClose={() => setShowUserForm(false)} onSave={data => {
+              {showUserForm && <UserForm item={editItem} onClose={() => setShowUserForm(false)} onSave={data => {
                 if (editUser) setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...data } : u));
                 else setUsers(prev => [...prev, { ...data, id: uid() }]);
                 setShowUserForm(false);
@@ -2117,16 +2385,9 @@
             <div className="card">
               <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: '16px' }}>🔥 Konfigurasi Firebase</h2>
               <div style={{ background: useFirebase ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)', border: `1px solid ${useFirebase ? 'rgba(16,185,129,.3)' : 'rgba(239,68,68,.3)'}`, borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: 12 }}>
-                {useFirebase ? '✅ Firebase terhubung dan aktif' : '⚠️ Firebase belum dikonfigurasi. Isi config di bawah lalu reload halaman.'}
+                {useFirebase ? '✅ Firebase terhubung dan aktif' : '⚠️ Firebase belum dikonfigurasi. Isi config di config.js lalu reload halaman.'}
               </div>
-              {Object.keys(FIREBASE_CONFIG).map(k => (
-                <div key={k} style={{ marginBottom: 10 }}>
-                  <div className="label">{k}</div>
-                  <input className="input mono" placeholder={`Masukkan ${k}`} defaultValue={FIREBASE_CONFIG[k]} style={{ fontSize: 12 }}
-                    onChange={e => setFbConfig(c => ({ ...c, [k]: e.target.value }))} />
-                </div>
-              ))}
-              <p style={{ fontSize: 11, color: 'var(--dim)', marginTop: '8px' }}>Setelah mengisi config Firebase, salin file ini dan ganti nilai FIREBASE_CONFIG di baris 22-29.</p>
+              <p style={{ fontSize: 11, color: 'var(--dim)', marginTop: '8px' }}>Konfigurasi Firebase ada di file config.js. Edit file tersebut untuk mengubah pengaturan.</p>
             </div>
           )}
 
@@ -2206,7 +2467,14 @@
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn btn-ghost" onClick={onClose}>Batal</button>
-                <button className="btn btn-primary" onClick={() => onSave(form)}>
+                <button className="btn btn-primary" onClick={() => {
+                  const dataToSave = { ...form };
+                  if (dataToSave.pin && dataToSave.pin.length >= 4) {
+                    dataToSave.pinHash = hashPin(dataToSave.pin);
+                    delete dataToSave.pin;
+                  }
+                  onSave(dataToSave);
+                }}>
                   <Icon name="check" size={14} /> Simpan
                 </button>
               </div>
@@ -2228,22 +2496,41 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // GOOGLE SHEETS SYNC HELPERS
+    // GOOGLE SHEETS SYNC (with token & offline queue)
     // ═══════════════════════════════════════════════════
     function syncToGoogleSheets(action, payload) {
-      if (typeof GOOGLE_SHEET_URL === 'undefined' || !GOOGLE_SHEET_URL.startsWith('http')) return;
-      try {
-        // PERBAIKAN BUG: Header 'Content-Type: application/json' DIHAPUS.
-        // Dengan mode 'no-cors', browser memblokir header non-standar ini sehingga
-        // request tidak pernah sampai ke Apps Script (doPost tidak terpanggil).
-        // Tanpa header ini, body tetap terkirim sebagai text/plain dan Apps Script
-        // dapat membacanya lewat e.postData.contents lalu di-parse sebagai JSON.
-        fetch(GOOGLE_SHEET_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          body: JSON.stringify({ action, payload })
-        }).catch(e => console.error('Google Sheets Sync Error:', e));
-      } catch (e) { }
+      return new Promise((resolve, reject) => {
+        if (typeof GOOGLE_SHEET_URL === 'undefined' || !GOOGLE_SHEET_URL.startsWith('http')) {
+          resolve();
+          return;
+        }
+
+        const securePayload = {
+          action,
+          payload,
+          token: APP_SECRET,
+          timestamp: Date.now(),
+          version: '3.0'
+        };
+
+        try {
+          fetch(GOOGLE_SHEET_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            body: JSON.stringify(securePayload)
+          })
+            .then(() => resolve())
+            .catch((error) => {
+              console.error('Google Sheets Sync Error:', error);
+              if (!navigator.onLine) {
+                OfflineQueue.add(action, payload);
+              }
+              reject(error);
+            });
+        } catch (e) {
+          reject(e);
+        }
+      });
     }
 
     // ═══════════════════════════════════════════════════
@@ -2270,7 +2557,6 @@
       const [online, setOnline] = useState(navigator.onLine);
       const [toasts, setToasts] = useState([]);
 
-      // Persistent state via localStorage (+Firebase sync)
       const [products, setProductsState] = useState(() => LS.get('products', []));
       const [transactions, setTransactionsState] = useState(() => LS.get('transactions', []));
       const [members, setMembersState] = useState(() => LS.get('members', []));
@@ -2295,14 +2581,40 @@
       const setUsers = persist('users', setUsersState);
       const setDailyProfits = persist('dailyProfits', setDailyProfitsState);
 
-      const addTransaction = (tx) => {
+      const addTransaction = async (tx) => {
+        // Validasi stok
+        const currentProducts = LS.get('products', []);
+        let stockValid = true;
+        const stockErrors = [];
+
+        for (const item of tx.items) {
+          const product = currentProducts.find(p => p.id === item.id);
+          if (!product) {
+            stockValid = false;
+            stockErrors.push(`Produk "${item.name}" tidak ditemukan`);
+          } else if (product.stock < item.qty) {
+            stockValid = false;
+            stockErrors.push(`Stok "${item.name}" tidak cukup (tersedia: ${product.stock}, diminta: ${item.qty})`);
+          }
+        }
+
+        if (!stockValid) {
+          addToast(stockErrors.join('. '), 'var(--danger)', '❌', 'Gagal Validasi Stok');
+          return false;
+        }
+
         setTransactions(prev => {
           const next = [tx, ...prev];
-          LS.set('transactions', next);
+          const limited = next.slice(0, STORAGE_LIMITS.maxTransactions);
+          LS.set('transactions', limited);
           if (useFirebase) db?.collection('transactions').doc(tx.id).set(tx);
-          syncToGoogleSheets('ADD_TRANSACTION', tx); // Backup ke Google Sheets
+          syncToGoogleSheets('ADD_TRANSACTION', tx).catch(() => {
+            console.log('Transaksi masuk antrean offline');
+          });
           return next;
         });
+
+        return true;
       };
 
       const addDebt = (debt) => {
@@ -2319,8 +2631,25 @@
         setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
       };
 
+      // Online/Offline listener
       useEffect(() => {
-        const on = () => setOnline(true);
+        const on = () => {
+          setOnline(true);
+          // Proses antrean offline saat online
+          setTimeout(async () => {
+            const queueCount = OfflineQueue.getCount();
+            if (queueCount > 0) {
+              addToast(`Memproses ${queueCount} data offline...`, 'var(--info)', '🔄', 'Sinkronisasi');
+            }
+            await OfflineQueue.process();
+            const remaining = OfflineQueue.getCount();
+            if (queueCount > 0 && remaining === 0) {
+              addToast('Semua data offline berhasil disinkronkan!', 'var(--success)', '✅', 'Sinkronisasi');
+            } else if (remaining > 0) {
+              addToast(`${remaining} data gagal disinkronkan`, 'var(--warn)', '⚠️', 'Sinkronisasi');
+            }
+          }, 2000);
+        };
         const off = () => setOnline(false);
         window.addEventListener('online', on);
         window.addEventListener('offline', off);
