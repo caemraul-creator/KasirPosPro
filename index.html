@@ -964,10 +964,15 @@
             <PaymentModal total={total} cart={cart} member={selMember} discount={discount}
               onClose={() => setShowPay(false)}
               onConfirm={(method, paid, notes) => {
+                // Hitung keuntungan per transaksi
+                const rawProfit = cart.reduce((s, i) => s + ((i.price || 0) - (i.cost || 0)) * i.qty, 0);
+                const txProfit = Math.max(0, rawProfit - discount);
+                const txMargin = total > 0 ? Math.round(txProfit / total * 100) : 0;
                 const tx = {
                   id: uid(), date: today(), time: new Date().toISOString(),
                   items: cart.map(i => ({ ...i, cost: i.cost || 0 })),
                   subtotal, discount, total, method, paid, change: Math.max(0, paid - total),
+                  profit: txProfit, margin: txMargin,
                   memberId: selMember?.id, memberName: selMember?.name,
                   cashier: user.name, outlet: user.outlet, notes
                 };
@@ -982,11 +987,17 @@
                 if (method === 'Hutang' && selMember) {
                   addDebt({ id: uid(), memberId: selMember.id, memberName: selMember.name, amount: total, txId: tx.id, date: today(), dueDate: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0], paid: false, notes });
                 }
-                // Add member points
-                if (selMember) {
-                  // TODO: update member points
+                // Update member points (1 poin per Rp 1.000 belanja)
+                if (selMember && method !== 'Hutang') {
+                  const pointsEarned = Math.floor(total / 1000);
+                  if (pointsEarned > 0) {
+                    const updatedMember = { ...selMember, points: (selMember.points || 0) + pointsEarned };
+                    setMembers(prev => prev.map(m => m.id === selMember.id ? updatedMember : m));
+                    syncToGoogleSheets('UPDATE_MEMBER', updatedMember);
+                    addToast(`+${pointsEarned} poin untuk ${selMember.name}`, 'var(--info)', '⭐');
+                  }
                 }
-                addToast(`Transaksi berhasil! ${fmt(total)}`, 'var(--success)', '✅');
+                addToast(`Transaksi berhasil! ${fmt(total)}`, 'var(--success)', '✅', 'Pembayaran Diterima');
                 clearCart();
                 setShowPay(false);
               }}
@@ -1689,12 +1700,22 @@
       }, [hourlyData, chartType]);
 
       const exportReport = () => {
-        const data = filtered.map(tx => ({
-          ID: tx.id, Tanggal: tx.date, Waktu: fmtTime(tx.time),
-          'Total (Rp)': tx.total, 'Metode Bayar': tx.method,
-          Kasir: tx.cashier, Member: tx.memberName || '-',
-          Catatan: tx.notes || ''
-        }));
+        const data = filtered.map(tx => {
+          const txCost = tx.items.reduce((s, i) => s + (i.cost || 0) * i.qty, 0);
+          const txProfit = tx.method !== 'Hutang' ? (tx.profit !== undefined ? tx.profit : (tx.total - txCost)) : 0;
+          return {
+            ID: tx.id, Tanggal: tx.date, Waktu: fmtTime(tx.time),
+            Kasir: tx.cashier, Outlet: tx.outlet || '-',
+            Member: tx.memberName || '-', 'Metode Bayar': tx.method,
+            'Subtotal (Rp)': tx.subtotal || tx.total,
+            'Diskon (Rp)': tx.discount || 0,
+            'Total (Rp)': tx.total,
+            'HPP (Rp)': txCost,
+            'Keuntungan (Rp)': txProfit,
+            'Margin (%)': tx.margin !== undefined ? tx.margin : (tx.total > 0 ? Math.round(txProfit / tx.total * 100) : 0),
+            Catatan: tx.notes || ''
+          };
+        });
         exportToExcel(data, 'Laporan_' + period);
       };
 
@@ -1828,7 +1849,20 @@
           }
           return [...prev, { date: today(), revenue: todayRevenue, cost: todayCost, profit: todayProfit, withdrawn: amount, withdrawals: [entry] }];
         });
-        addToast(`Penarikan ${fmt(amount)} berhasil!`, 'var(--success)', '💰');
+        // ✅ Sync ke Google Sheets — sheet "Keuntungan"
+        syncToGoogleSheets('WITHDRAW_PROFIT', {
+          id: entry.id,
+          date: today(),
+          time: entry.time,
+          amount,
+          notes,
+          by: user.name,
+          todayRevenue,
+          todayCost,
+          todayProfit,
+          availableBefore: available,
+        });
+        addToast(`Penarikan ${fmt(amount)} berhasil!`, 'var(--success)', '💰', 'Ambil Keuntungan');
         setShowWithdraw(false);
       };
 
@@ -1855,6 +1889,21 @@
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <div><h1 style={{ fontSize: 22, fontWeight: 800 }}>💰 Manajemen Keuangan</h1>
               <p style={{ color: 'var(--muted)', fontSize: 13 }}>Perhitungan laba & penarikan keuntungan</p></div>
+            <button className="btn btn-ghost" onClick={() => {
+              const allWithdrawals = dailyProfits.filter(d => d.withdrawals?.length > 0).flatMap(d =>
+                (d.withdrawals || []).map(w => ({
+                  ID: w.id, Tanggal: w.date || d.date, Waktu: fmtDateTime(w.time),
+                  'Jumlah Ditarik (Rp)': w.amount,
+                  'Omzet Hari Itu (Rp)': d.revenue || 0,
+                  'HPP Hari Itu (Rp)': d.cost || 0,
+                  'Laba Hari Itu (Rp)': d.profit || 0,
+                  Catatan: w.notes || '-', Oleh: w.by
+                }))
+              );
+              exportToExcel(allWithdrawals, 'Riwayat_Penarikan');
+            }}>
+              <Icon name="download" size={14} /> Export Riwayat
+            </button>
           </div>
 
           {/* Today's finance */}
@@ -1888,17 +1937,54 @@
           </div>
 
           {/* 30 day summary */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
             {[
               { l: 'Total Omzet 30 Hari', v: fmt(totalRevenue30), c: 'var(--success)' },
               { l: 'Total Laba 30 Hari', v: fmt(totalProfit30), c: 'var(--primary)' },
               { l: 'Total Ditarik 30 Hari', v: fmt(totalWithdrawn30), c: 'var(--warn)' },
+              { l: 'Sisa Belum Ditarik', v: fmt(Math.max(0, totalProfit30 - totalWithdrawn30)), c: 'var(--info)' },
             ].map((s, i) => (
               <div key={i} className="stat-card">
                 <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>{s.l}</div>
                 <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: s.c }}>{s.v}</div>
               </div>
             ))}
+          </div>
+
+          {/* 30-day table */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: '12px' }}>📅 Riwayat Laba 30 Hari Terakhir</div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--card2)', borderBottom: '1px solid var(--border)' }}>
+                    {['Tanggal', 'Omzet', 'HPP', 'Laba', 'Margin', 'Ditarik', 'Sisa'].map(h => (
+                      <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '.5px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {last30.filter(d => d.revenue > 0 || d.withdrawn > 0).reverse().map(d => {
+                    const margin = d.revenue > 0 ? Math.round(d.profit / d.revenue * 100) : 0;
+                    const sisa = Math.max(0, d.profit - d.withdrawn);
+                    return (
+                      <tr key={d.date} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600 }}>{fmtDate(d.date)}</td>
+                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: 'var(--success)' }}>{fmt(d.revenue)}</span></td>
+                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: 'var(--warn)' }}>{fmt(d.cost)}</span></td>
+                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 700 }}>{fmt(d.profit)}</span></td>
+                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: margin >= 20 ? 'var(--success)' : 'var(--warn)' }}>{margin}%</span></td>
+                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: d.withdrawn > 0 ? 'var(--info)' : 'var(--dim)' }}>{d.withdrawn > 0 ? fmt(d.withdrawn) : '-'}</span></td>
+                        <td style={{ padding: '10px 12px' }}><span className="mono" style={{ fontSize: 12, color: sisa > 0 ? 'var(--success)' : 'var(--dim)' }}>{sisa > 0 ? fmt(sisa) : '-'}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {last30.every(d => d.revenue === 0 && d.withdrawn === 0) && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Belum ada data keuangan</div>
+              )}
+            </div>
           </div>
 
           {/* Withdrawal history */}

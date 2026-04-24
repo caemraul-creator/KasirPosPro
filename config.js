@@ -11,7 +11,7 @@ const FIREBASE_CONFIG = {
 
 // Konfigurasi Google Sheets Backup
 // Ganti dengan URL Web App Apps Script Anda
-const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwSThZ-2yt2KY7IqXYf2IN9vmj2I_LvndfsoYANBf7OIb8kOFMI7KDbMW42jrqQGqQ/exec";
+const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbx6wA3J__MnywVQod-UsJdGXUuWP-elkypGNdwhZGYkSz3z-EI1BAUIE_nI12sG757z/exec";
 
 // Data pengguna (Password/PIN)
 // Secara default disisakan 1 Admin agar Anda tetap bisa login pertama kali.
