@@ -998,17 +998,25 @@
 
       const handleResetPin = () => {
         if (!confirm('Reset semua PIN ke default (1234)? Lakukan ini hanya jika Anda benar-benar tidak bisa masuk.')) return;
-        // Hapus semua data user dari localStorage
-        localStorage.removeItem('kp_users');
-        // Reset Firebase users jika tersedia
+
+        // Buat ulang semua user dengan pinHash yang benar langsung ke localStorage
+        const defaultPin = '1234';
+        const resetUsers = USERS.map(u => {
+          const { pin, mustChangePin, ...rest } = u;
+          return { ...rest, pinHash: hashPin(defaultPin) };
+        });
+
+        // Simpan ke localStorage DULU sebelum reload — ini yang jadi sumber kebenaran
+        localStorage.setItem('kp_users', JSON.stringify(resetUsers));
+
+        // Update Firebase juga (tidak perlu tunggu selesai)
         if (useFirebase && db) {
-          USERS.forEach(u => {
-            const resetData = { ...u, pinHash: hashPin('1234'), pin: undefined };
-            delete resetData.pin;
-            db.collection('users').doc(u.id).set(resetData, { merge: true })
+          resetUsers.forEach(u => {
+            db.collection('users').doc(u.id).set({ ...u }, { merge: true })
               .catch(e => console.warn('Gagal reset user di Firebase:', e));
           });
         }
+
         alert('✅ PIN semua user direset ke 1234. Silakan login ulang.');
         window.location.reload();
       };
