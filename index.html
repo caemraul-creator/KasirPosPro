@@ -2724,7 +2724,7 @@
                   </div>
                 ))}
               </div>
-              {showUserForm && <UserForm item={editItem} onClose={() => setShowUserForm(false)} onSave={data => {
+              {showUserForm && <UserForm item={editUser} onClose={() => setShowUserForm(false)} onSave={data => {
                 if (editUser) setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...data } : u));
                 else setUsers(prev => [...prev, { ...data, id: uid() }]);
                 setShowUserForm(false);
@@ -2777,9 +2777,7 @@
                 <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: '12px' }}>Hapus semua data dari penyimpanan lokal. Tidak dapat dibatalkan!</p>
                 <button className="btn btn-danger" onClick={() => {
                   if (confirm('YAKIN? Semua data akan dihapus permanen!')) {
-                    ['transactions', 'products', 'members', 'debts', 'dailyProfits'].forEach(k => LS.set(k, []));
-                    LS.set('products', []);
-                    LS.set('members', []);
+                    ['transactions', 'products', 'members', 'debts', 'dailyProfits', 'users'].forEach(k => LS.set(k, []));
                     window.location.reload();
                   }
                 }}>⚠️ Reset Semua Data</button>
@@ -2825,6 +2823,21 @@
                     dataToSave.pinHash = hashPin(dataToSave.pin);
                     delete dataToSave.pin;
                   }
+
+                  // SINKRONISASI KE FIREBASE UNTUK USERS
+                  if (useFirebase && db) {
+                    const firebaseUserData = {
+                      id: item?.id || uid(),
+                      name: form.name,
+                      email: form.email || '',
+                      role: form.role,
+                      outlet: form.outlet || 'Pusat',
+                    };
+                    db.collection('users').doc(firebaseUserData.id).set(firebaseUserData, { merge: true })
+                      .then(() => console.log('✅ User tersimpan ke Firebase:', form.name))
+                      .catch(e => console.error('❌ Gagal simpan user ke Firebase:', e));
+                  }
+
                   onSave(dataToSave);
                 }}>
                   <Icon name="check" size={14} /> Simpan
@@ -2886,18 +2899,50 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // FIREBASE SYNC HELPERS
+    // FIREBASE SYNC HELPERS (UPDATED - SUPPORT USERS)
     // ═══════════════════════════════════════════════════
     async function syncToFirebase(collection, data) {
       if (!db) return;
       try {
         const batch = db.batch();
-        data.forEach(item => {
-          const ref = db.collection(collection).doc(item.id);
-          batch.set(ref, item, { merge: true });
-        });
+
+        // Jika data adalah array
+        if (Array.isArray(data)) {
+          data.forEach(item => {
+            // Untuk users, jangan kirim data PIN
+            if (collection === 'users') {
+              const safeUser = { ...item };
+              delete safeUser.pin;
+              delete safeUser.pinHash;
+              delete safeUser.mustChangePin;
+              const ref = db.collection(collection).doc(item.id);
+              batch.set(ref, safeUser, { merge: true });
+            } else {
+              const ref = db.collection(collection).doc(item.id);
+              batch.set(ref, item, { merge: true });
+            }
+          });
+        }
+        // Jika data adalah object tunggal
+        else if (typeof data === 'object' && data.id) {
+          if (collection === 'users') {
+            const safeUser = { ...data };
+            delete safeUser.pin;
+            delete safeUser.pinHash;
+            delete safeUser.mustChangePin;
+            const ref = db.collection(collection).doc(data.id);
+            batch.set(ref, safeUser, { merge: true });
+          } else {
+            const ref = db.collection(collection).doc(data.id);
+            batch.set(ref, data, { merge: true });
+          }
+        }
+
         await batch.commit();
-      } catch (e) { console.error('Firebase sync error:', e); }
+        console.log(`✅ Sinkronisasi ${collection} ke Firebase berhasil`);
+      } catch (e) {
+        console.error('Firebase sync error:', e);
+      }
     }
 
     // ═══════════════════════════════════════════════════
@@ -2926,12 +2971,13 @@
         });
       };
 
+      // AKTIFKAN SINCRONISASI FIREBASE UNTUK SEMUA DATA TERMASUK USERS
       const setProducts = persist('products', setProductsState, 'products');
-      const setTransactions = persist('transactions', setTransactionsState);
+      const setTransactions = persist('transactions', setTransactionsState, 'transactions');
       const setMembers = persist('members', setMembersState, 'members');
       const setDebts = persist('debts', setDebtsState, 'debts');
-      const setUsers = persist('users', setUsersState);
-      const setDailyProfits = persist('dailyProfits', setDailyProfitsState);
+      const setUsers = persist('users', setUsersState, 'users'); // 🔥 USERS SEKARANG DISINKRONKAN KE FIREBASE
+      const setDailyProfits = persist('dailyProfits', setDailyProfitsState, 'dailyProfits');
 
       const addTransaction = async (tx) => {
         // Validasi stok
@@ -3008,23 +3054,42 @@
         return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
       }, []);
 
-      // Firebase realtime sync
+      // Firebase realtime sync (UPDATED - SUPPORT USERS)
       useEffect(() => {
         if (!db || !user) return;
         const unsubs = [];
-        ['products', 'members', 'transactions', 'debts'].forEach(coll => {
+
+        ['products', 'members', 'transactions', 'debts', 'users', 'dailyProfits'].forEach(coll => {
           const unsub = db.collection(coll).onSnapshot(snap => {
             if (!snap.empty) {
               const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-              LS.set(coll, data);
-              if (coll === 'products') setProductsState(data);
-              if (coll === 'members') setMembersState(data);
-              if (coll === 'transactions') setTransactionsState(data);
-              if (coll === 'debts') setDebtsState(data);
+
+              // Untuk users, gabungkan dengan PIN hash lokal
+              if (coll === 'users') {
+                const localUsers = LS.get('users', []);
+                const mergedUsers = data.map(remoteUser => {
+                  const localUser = localUsers.find(u => u.id === remoteUser.id);
+                  return {
+                    ...remoteUser,
+                    pinHash: localUser?.pinHash || remoteUser.pinHash,
+                    mustChangePin: localUser?.mustChangePin !== undefined ? localUser.mustChangePin : false
+                  };
+                });
+                LS.set(coll, mergedUsers);
+                setUsersState(mergedUsers);
+              } else {
+                LS.set(coll, data);
+                if (coll === 'products') setProductsState(data);
+                if (coll === 'members') setMembersState(data);
+                if (coll === 'transactions') setTransactionsState(data);
+                if (coll === 'debts') setDebtsState(data);
+                if (coll === 'dailyProfits') setDailyProfitsState(data);
+              }
             }
           });
           unsubs.push(unsub);
         });
+
         return () => unsubs.forEach(u => u());
       }, [user]);
 

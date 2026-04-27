@@ -36,5 +36,23 @@ const USERS = [
     pin: '1234',
     outlet: 'Pusat',
     mustChangePin: true
+  },
+  {
+    id: 'u2',
+    name: 'Kasir 1',
+    email: 'kasir@toko.com',
+    role: 'kasir',
+    pin: '1234',
+    outlet: 'Pusat',
+    mustChangePin: true
+  },
+  {
+    id: 'u3',
+    name: 'Supervisor',
+    email: 'spv@toko.com',
+    role: 'supervisor',
+    pin: '1234',
+    outlet: 'Pusat',
+    mustChangePin: true
   }
 ];
