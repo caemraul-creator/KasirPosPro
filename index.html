@@ -928,6 +928,38 @@
       const [selUser, setSelUser] = useState(users[0]?.id || '');
       const [showChangePin, setShowChangePin] = useState(false);
       const [newPin, setNewPin] = useState('');
+      const [loadingUsers, setLoadingUsers] = useState(false);
+
+      // Fetch users dari Firebase sebelum login (agar semua device sync)
+      useEffect(() => {
+        if (!useFirebase || !db) return;
+        setLoadingUsers(true);
+        db.collection('users').get().then(snap => {
+          if (!snap.empty) {
+            const remoteUsers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            // Gabungkan dengan PIN hash lokal agar PIN tetap bisa digunakan
+            const localUsers = LS.get('users', []);
+            const merged = remoteUsers.map(ru => {
+              const lu = localUsers.find(u => u.id === ru.id);
+              return {
+                ...ru,
+                pinHash: lu?.pinHash || ru.pinHash,
+                pin: lu?.pin || ru.pin,
+                mustChangePin: lu?.mustChangePin !== undefined ? lu.mustChangePin : (ru.mustChangePin !== undefined ? ru.mustChangePin : true)
+              };
+            });
+            // Konversi legacy PIN ke hash jika perlu
+            const finalUsers = merged.map(u => {
+              if (!u.pinHash && u.pin) return { ...u, pinHash: hashPin(u.pin), mustChangePin: true };
+              return u;
+            });
+            LS.set('users', finalUsers);
+            setUsersState(finalUsers);
+            if (finalUsers.length > 0) setSelUser(prev => finalUsers.find(u => u.id === prev) ? prev : finalUsers[0].id);
+          }
+        }).catch(e => console.warn('Gagal fetch users dari Firebase:', e))
+          .finally(() => setLoadingUsers(false));
+      }, []);
 
       const handleLogin = () => {
         const u = users.find(u => u.id === selUser);
@@ -1025,8 +1057,11 @@
             </div>
             <div className="card" style={{ padding: '28px' }}>
               <div style={{ marginBottom: '20px' }}>
-                <div className="label">Pilih Kasir</div>
-                <select className="input select" value={selUser} onChange={e => setSelUser(e.target.value)}>
+                <div className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Pilih Kasir
+                  {loadingUsers && <span style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 400 }}>⏳ Memuat dari server...</span>}
+                </div>
+                <select className="input select" value={selUser} onChange={e => setSelUser(e.target.value)} disabled={loadingUsers}>
                   {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
                 </select>
               </div>
