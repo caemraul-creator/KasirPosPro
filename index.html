@@ -1012,6 +1012,19 @@
         LS.set('users', updatedUsers);
         setShowChangePin(false);
 
+        // Sync pinHash ke Firebase agar semua perangkat bisa login
+        if (useFirebase && db) {
+          const updatedUser = updatedUsers.find(u => u.id === selUser);
+          if (updatedUser) {
+            db.collection('users').doc(updatedUser.id).set({
+              pinHash: updatedUser.pinHash,
+              mustChangePin: false,
+            }, { merge: true })
+              .then(() => console.log('✅ PIN hash disinkronisasi ke Firebase untuk:', updatedUser.name))
+              .catch(e => console.warn('⚠️ Gagal sync PIN ke Firebase:', e));
+          }
+        }
+
         const updatedUser = updatedUsers.find(u => u.id === selUser);
         doLogin(updatedUser);
       };
@@ -2859,17 +2872,19 @@
                     delete dataToSave.pin;
                   }
 
-                  // SINKRONISASI KE FIREBASE UNTUK USERS
+                  // SINKRONISASI KE FIREBASE UNTUK USERS (termasuk pinHash agar bisa login di perangkat lain)
                   if (useFirebase && db) {
                     const firebaseUserData = {
-                      id: item?.id || uid(),
-                      name: form.name,
-                      email: form.email || '',
-                      role: form.role,
-                      outlet: form.outlet || 'Pusat',
+                      id: item?.id || dataToSave.id || uid(),
+                      name: dataToSave.name || form.name,
+                      email: dataToSave.email || form.email || '',
+                      role: dataToSave.role || form.role,
+                      outlet: dataToSave.outlet || form.outlet || 'Pusat',
+                      pinHash: dataToSave.pinHash || item?.pinHash || '',
+                      mustChangePin: false,
                     };
                     db.collection('users').doc(firebaseUserData.id).set(firebaseUserData, { merge: true })
-                      .then(() => console.log('✅ User tersimpan ke Firebase:', form.name))
+                      .then(() => console.log('✅ User tersimpan ke Firebase:', firebaseUserData.name))
                       .catch(e => console.error('❌ Gagal simpan user ke Firebase:', e));
                   }
 
