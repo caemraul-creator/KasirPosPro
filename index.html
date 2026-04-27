@@ -920,14 +920,12 @@
         // Convert legacy PIN to hash if needed
         return storedUsers.map(u => {
           if (!u.pinHash && u.pin) {
-            return { ...u, pinHash: hashPin(u.pin), mustChangePin: true };
+            return { ...u, pinHash: hashPin(u.pin) };
           }
           return u;
         });
       });
       const [selUser, setSelUser] = useState(users[0]?.id || '');
-      const [showChangePin, setShowChangePin] = useState(false);
-      const [newPin, setNewPin] = useState('');
       const [loadingUsers, setLoadingUsers] = useState(false);
 
       // Fetch users dari Firebase sebelum login (agar semua device sync)
@@ -945,12 +943,11 @@
                 ...ru,
                 pinHash: lu?.pinHash || ru.pinHash,
                 pin: lu?.pin || ru.pin,
-                mustChangePin: lu?.mustChangePin !== undefined ? lu.mustChangePin : (ru.mustChangePin !== undefined ? ru.mustChangePin : true)
               };
             });
             // Konversi legacy PIN ke hash jika perlu
             const finalUsers = merged.map(u => {
-              if (!u.pinHash && u.pin) return { ...u, pinHash: hashPin(u.pin), mustChangePin: true };
+              if (!u.pinHash && u.pin) return { ...u, pinHash: hashPin(u.pin) };
               return u;
             });
             LS.set('users', finalUsers);
@@ -970,13 +967,6 @@
         if (!isValid) return setErr('PIN salah');
 
         setErr('');
-
-        // Cek apakah wajib ganti PIN
-        if (u.mustChangePin) {
-          setShowChangePin(true);
-          return;
-        }
-
         doLogin(u);
       };
 
@@ -995,70 +985,7 @@
         onLogin(u);
       };
 
-      const handleChangePin = () => {
-        if (newPin.length < 4 || newPin.length > 6) {
-          return setErr('PIN harus 4-6 digit');
-        }
-
-        const updatedUsers = users.map(u => {
-          if (u.id === selUser) {
-            const { pin, ...rest } = u;
-            return { ...rest, pinHash: hashPin(newPin), mustChangePin: false };
-          }
-          return u;
-        });
-
-        setUsersState(updatedUsers);
-        LS.set('users', updatedUsers);
-        setShowChangePin(false);
-
-        // Sync pinHash ke Firebase agar semua perangkat bisa login
-        if (useFirebase && db) {
-          const updatedUser = updatedUsers.find(u => u.id === selUser);
-          if (updatedUser) {
-            db.collection('users').doc(updatedUser.id).set({
-              pinHash: updatedUser.pinHash,
-              mustChangePin: false,
-            }, { merge: true })
-              .then(() => console.log('✅ PIN hash disinkronisasi ke Firebase untuk:', updatedUser.name))
-              .catch(e => console.warn('⚠️ Gagal sync PIN ke Firebase:', e));
-          }
-        }
-
-        const updatedUser = updatedUsers.find(u => u.id === selUser);
-        doLogin(updatedUser);
-      };
-
       const numPad = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
-
-      if (showChangePin) {
-        return (
-          <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-            <div className="card" style={{ padding: '28px', maxWidth: 380, width: '100%' }}>
-              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                <div style={{ fontSize: 36, marginBottom: '8px' }}>🔒</div>
-                <h3 style={{ fontWeight: 700, fontSize: 18 }}>Ganti PIN Wajib</h3>
-                <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: '4px' }}>
-                  Demi keamanan, Anda harus mengganti PIN default.
-                </p>
-              </div>
-              <div className="label">PIN Baru (4-6 digit)</div>
-              <input
-                className="input mono"
-                type="password"
-                value={newPin}
-                onChange={e => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="Masukkan PIN baru"
-                style={{ fontSize: 18, textAlign: 'center', letterSpacing: '8px', marginBottom: '16px' }}
-              />
-              {err && <p style={{ color: 'var(--danger)', fontSize: 12, marginBottom: '12px', textAlign: 'center' }}>{err}</p>}
-              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={handleChangePin}>
-                Simpan PIN Baru
-              </button>
-            </div>
-          </div>
-        );
-      }
 
       return (
         <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: '20px' }}>
@@ -2881,7 +2808,6 @@
                       role: dataToSave.role || form.role,
                       outlet: dataToSave.outlet || form.outlet || 'Pusat',
                       pinHash: dataToSave.pinHash || item?.pinHash || '',
-                      mustChangePin: false,
                     };
                     db.collection('users').doc(firebaseUserData.id).set(firebaseUserData, { merge: true })
                       .then(() => console.log('✅ User tersimpan ke Firebase:', firebaseUserData.name))
@@ -2964,7 +2890,6 @@
               const safeUser = { ...item };
               delete safeUser.pin;
               delete safeUser.pinHash;
-              delete safeUser.mustChangePin;
               const ref = db.collection(collection).doc(item.id);
               batch.set(ref, safeUser, { merge: true });
             } else {
@@ -2979,7 +2904,6 @@
             const safeUser = { ...data };
             delete safeUser.pin;
             delete safeUser.pinHash;
-            delete safeUser.mustChangePin;
             const ref = db.collection(collection).doc(data.id);
             batch.set(ref, safeUser, { merge: true });
           } else {
@@ -3122,7 +3046,6 @@
                   return {
                     ...remoteUser,
                     pinHash: localUser?.pinHash || remoteUser.pinHash,
-                    mustChangePin: localUser?.mustChangePin !== undefined ? localUser.mustChangePin : false
                   };
                 });
                 LS.set(coll, mergedUsers);
