@@ -2755,7 +2755,7 @@
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span className={`badge badge-${u.role === 'admin' ? 'danger' : u.role === 'supervisor' ? 'warn' : 'info'}`}>{u.role}</span>
                       <button className="btn btn-ghost btn-sm" onClick={() => { setEditUser(u); setShowUserForm(true); }}><Icon name="edit" size={12} /></button>
-                      {u.role !== 'admin' && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Hapus user?')) setUsers(prev => prev.filter(x => x.id !== u.id)); }}><Icon name="trash" size={12} /></button>}
+                      {u.role !== 'admin' && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Hapus user "' + u.name + '"? User tidak bisa dikembalikan.')) { deleteFromFirebase('users', u.id); setUsers(prev => prev.filter(x => x.id !== u.id)); addToast('User ' + u.name + ' dihapus permanen', 'var(--muted)', '🗑️'); } }}><Icon name="trash" size={12} /></button>}
                     </div>
                   </div>
                 ))}
@@ -2954,20 +2954,40 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // FIREBASE SYNC HELPERS (UPDATED - SUPPORT USERS)
+    // FIREBASE SYNC HELPERS (UPDATED - HANDLE DELETIONS)
     // ═══════════════════════════════════════════════════
+
+    // Hapus satu dokumen dari Firebase
+    async function deleteFromFirebase(collection, docId) {
+      if (!db) return;
+      try {
+        await db.collection(collection).doc(docId).delete();
+        console.log(`✅ Dokumen ${docId} dihapus dari Firebase (${collection})`);
+      } catch (e) {
+        console.error(`Gagal hapus ${docId} dari Firebase:`, e);
+      }
+    }
+
+    // Sinkronisasi data ke Firebase + hapus dokumen yang sudah tidak ada di lokal
     async function syncToFirebase(collection, data) {
       if (!db) return;
       try {
         const batch = db.batch();
 
-        // Jika data adalah array
+        // Ambil daftar ID yang ada di lokal
+        var localIds = new Set();
+        if (Array.isArray(data)) {
+          data.forEach(item => localIds.add(item.id));
+        } else if (typeof data === 'object' && data.id) {
+          localIds.add(data.id);
+        }
+
+        // Jika data adalah array — update semua + hapus yang tidak ada
         if (Array.isArray(data)) {
           data.forEach(item => {
-            // Untuk users, jangan kirim data PIN
             if (collection === 'users') {
               const safeUser = { ...item };
-              delete safeUser.pin; // hapus plain PIN, tapi pinHash tetap disimpan
+              delete safeUser.pin;
               const ref = db.collection(collection).doc(item.id);
               batch.set(ref, safeUser, { merge: true });
             } else {
@@ -2975,12 +2995,21 @@
               batch.set(ref, item, { merge: true });
             }
           });
+
+          // [BUG FIX] Hapus dokumen di Firebase yang sudah dihapus dari lokal
+          const snap = await db.collection(collection).get();
+          snap.forEach(doc => {
+            if (!localIds.has(doc.id)) {
+              batch.delete(doc.ref);
+              console.log(`🗑️ Dokumen ${doc.id} dihapus dari Firebase (${collection})`);
+            }
+          });
         }
         // Jika data adalah object tunggal
         else if (typeof data === 'object' && data.id) {
           if (collection === 'users') {
             const safeUser = { ...data };
-            delete safeUser.pin; // hapus plain PIN, tapi pinHash tetap disimpan
+            delete safeUser.pin;
             const ref = db.collection(collection).doc(data.id);
             batch.set(ref, safeUser, { merge: true });
           } else {
