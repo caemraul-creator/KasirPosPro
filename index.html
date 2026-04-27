@@ -1335,84 +1335,214 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // BARCODE SCANNER MODAL (Kamera)
+    // BARCODE SCANNER MODAL (Kamera) — v2
+    //   Android Chrome : BarcodeDetector API (native, HD)
+    //   iOS / lainnya  : html5-qrcode + video constraint HD
     // ═══════════════════════════════════════════════════
     function BarcodeScannerModal({ onScan, onClose, title = 'Scan Barcode' }) {
-      const scannerRef = useRef(null);
-      const html5QrCodeRef = useRef(null);
-      const [error, setError] = useState('');
-      const [scanning, setScanning] = useState(false);
+      const videoRef = useRef(null);
+      const qrDivRef = useRef(null);
+      const streamRef = useRef(null);
+      const rafRef = useRef(null);
+      const qrObjRef = useRef(null);
+      const doneRef = useRef(false);
+
+      const [status, setStatus] = useState('init');  // init | ready | error
+      const [errMsg, setErrMsg] = useState('');
+      const [torch, setTorch] = useState(false);
+      const [hasTorch, setHasTorch] = useState(false);
+      const useNative = 'BarcodeDetector' in window;
+
+      // ── stop semua resource ──
+      const stopAll = useCallback(() => {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+        if (qrObjRef.current) qrObjRef.current.stop().catch(() => { });
+      }, []);
+
+      // ── toggle senter ──
+      const toggleTorch = useCallback(async () => {
+        const track = streamRef.current?.getVideoTracks()[0];
+        if (!track) return;
+        try {
+          const next = !torch;
+          await track.applyConstraints({ advanced: [{ torch: next }] });
+          setTorch(next);
+        } catch (e) { }
+      }, [torch]);
 
       useEffect(() => {
-        if (!window.Html5Qrcode) {
-          setError('Library scanner tidak tersedia. Coba refresh halaman.');
-          return;
-        }
-        const scannerId = 'kp-barcode-scanner-' + Date.now();
-        if (scannerRef.current) {
-          scannerRef.current.id = scannerId;
-        }
-        const html5QrCode = new Html5Qrcode(scannerId);
-        html5QrCodeRef.current = html5QrCode;
+        doneRef.current = false;
 
-        const config = {
-          fps: 15, qrbox: { width: 260, height: 120 }, formatsToSupport: [
-            Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
-            Html5QrcodeSupportedFormats.QR_CODE
-          ]
-        };
+        // ── ANDROID / Chrome/Edge : BarcodeDetector API ──
+        if (useNative) {
+          (async () => {
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  facingMode: { ideal: 'environment' },
+                  width: { ideal: 1920, min: 1280 },
+                  height: { ideal: 1080, min: 720 },
+                }
+              });
+              if (doneRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+              streamRef.current = stream;
 
-        html5QrCode.start(
-          { facingMode: 'environment' },
-          config,
-          (decodedText) => {
-            onScan(decodedText);
-            html5QrCode.stop().catch(() => { });
-          },
-          () => { }
-        ).then(() => setScanning(true))
-          .catch(err => {
-            setError('Tidak dapat mengakses kamera. Pastikan izin kamera diberikan. (' + (err.message || err) + ')');
-          });
+              // cek kemampuan torch
+              const track = stream.getVideoTracks()[0];
+              const caps = track?.getCapabilities?.() || {};
+              if (caps.torch) setHasTorch(true);
 
-        return () => {
-          if (html5QrCodeRef.current) {
-            html5QrCodeRef.current.stop().catch(() => { });
+              if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                await videoRef.current.play();
+                setStatus('ready');
+              }
+
+              const formats = ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar'];
+              const detector = new BarcodeDetector({ formats });
+
+              let lastTs = 0;
+              const tick = async () => {
+                if (doneRef.current) return;
+                const now = performance.now();
+                if (now - lastTs > 120 && videoRef.current?.readyState >= 2) {
+                  lastTs = now;
+                  try {
+                    const codes = await detector.detect(videoRef.current);
+                    if (codes.length > 0 && !doneRef.current) {
+                      doneRef.current = true;
+                      stopAll();
+                      onScan(codes[0].rawValue);
+                      return;
+                    }
+                  } catch (_) { }
+                }
+                rafRef.current = requestAnimationFrame(tick);
+              };
+              rafRef.current = requestAnimationFrame(tick);
+
+            } catch (err) {
+              setStatus('error');
+              setErrMsg('Gagal membuka kamera: ' + (err.message || String(err)));
+            }
+          })();
+
+          // ── iOS / Firefox / lainnya : html5-qrcode dengan HD constraints ──
+        } else {
+          if (!window.Html5Qrcode) {
+            setStatus('error');
+            setErrMsg('Library scanner tidak tersedia. Coba refresh halaman.');
+            return;
           }
-        };
+          const divId = 'kp-qr-' + Date.now();
+          if (qrDivRef.current) qrDivRef.current.id = divId;
+
+          const qr = new Html5Qrcode(divId);
+          qrObjRef.current = qr;
+
+          qr.start(
+            { facingMode: 'environment' },
+            {
+              fps: 15,
+              qrbox: { width: 260, height: 110 },
+              videoConstraints: {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 1280, min: 640 },
+                height: { ideal: 720, min: 480 },
+              },
+              formatsToSupport: [
+                Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.QR_CODE,
+              ],
+            },
+            (code) => {
+              if (doneRef.current) return;
+              doneRef.current = true;
+              stopAll();
+              onScan(code);
+            },
+            () => { }
+          ).then(() => setStatus('ready'))
+            .catch(err => {
+              setStatus('error');
+              setErrMsg('Gagal membuka kamera: ' + (err.message || String(err)));
+            });
+        }
+
+        return () => { doneRef.current = true; stopAll(); };
       }, []);
 
       return (
         <div className="modal-overlay" onClick={onClose}>
-          <div className="modal" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
-            <div style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <h3 style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  📷 {title}
-                </h3>
-                <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}>
+          <div className="modal" style={{ maxWidth: 400, padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>📷 {title}</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {hasTorch && (
+                  <button className="btn btn-ghost btn-sm" onClick={toggleTorch} style={{ fontSize: 13 }}>
+                    {torch ? '🔦 ON' : '🔦 OFF'}
+                  </button>
+                )}
+                <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}>
                   <Icon name="x" size={18} />
                 </button>
               </div>
-              {error ? (
-                <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, padding: '14px', fontSize: 13, color: 'var(--danger)', marginBottom: 12 }}>
-                  ⚠️ {error}
+            </div>
+
+            {/* Viewport */}
+            <div style={{ background: '#000', position: 'relative', minHeight: 240 }}>
+              {status === 'error' ? (
+                <div style={{ padding: 20, color: 'var(--danger)', fontSize: 13 }}>
+                  ⚠️ {errMsg}
                 </div>
+              ) : useNative ? (
+                // Native BarcodeDetector — video langsung
+                <>
+                  <video
+                    ref={videoRef}
+                    style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }}
+                    playsInline muted autoPlay
+                  />
+                  {/* Kotak target scan */}
+                  <div style={{
+                    position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none'
+                  }}>
+                    <div style={{
+                      width: 270, height: 110,
+                      border: '2.5px solid var(--primary)',
+                      borderRadius: 10,
+                      boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
+                    }}>
+                      {/* sudut animasi */}
+                      {[
+                        { top: -2, left: -2, borderTop: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '8px 0 0 0' },
+                        { top: -2, right: -2, borderTop: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 8px 0 0' },
+                        { bottom: -2, left: -2, borderBottom: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '0 0 0 8px' },
+                        { bottom: -2, right: -2, borderBottom: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 0 8px 0' },
+                      ].map((s, i) => (
+                        <div key={i} style={{ position: 'absolute', width: 22, height: 22, ...s }} />
+                      ))}
+                    </div>
+                  </div>
+                </>
               ) : (
-                <div style={{ background: 'var(--card2)', borderRadius: 10, overflow: 'hidden', marginBottom: 12, minHeight: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <div ref={scannerRef} style={{ width: '100%' }} />
-                </div>
+                // html5-qrcode fallback (iOS)
+                <div ref={qrDivRef} style={{ width: '100%' }} />
               )}
-              {!error && (
-                <p style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginBottom: 12 }}>
-                  {scanning ? '🔍 Arahkan kamera ke barcode produk...' : '⏳ Memulai kamera...'}
-                </p>
-              )}
-              <button className="btn btn-ghost" style={{ width: '100%' }} onClick={onClose}>
-                Tutup
-              </button>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
+                {status === 'init' ? '⏳ Memulai kamera...'
+                  : status === 'ready' ? '🔍 Arahkan ke barcode...'
+                    : ''}
+              </p>
+              <button className="btn btn-ghost btn-sm" onClick={onClose}>Tutup</button>
             </div>
           </div>
         </div>
