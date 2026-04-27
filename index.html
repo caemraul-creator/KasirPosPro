@@ -857,7 +857,7 @@
     // ═══════════════════════════════════════════════════
     // MOBILE BOTTOM NAVIGATION
     // ═══════════════════════════════════════════════════
-    function MobileNav({ view, setView, user }) {
+    function MobileNav({ view, setView, user, onLogout }) {
       const canAccess = (v) => {
         if (v === 'dashboard') return true;
         if (user.role === 'admin') return true;
@@ -875,6 +875,12 @@
               <span>{VIEW_LABELS[v].replace('POS Kasir', 'Kasir')}</span>
             </div>
           ))}
+          <div className="mobile-nav-item" onClick={() => {
+            if (confirm(`Keluar dari akun ${user.name}?`)) onLogout();
+          }} style={{ color: 'var(--danger)' }}>
+            <span className="nav-icon"><Icon name="logout" size={20} color="var(--danger)" /></span>
+            <span>Keluar</span>
+          </div>
         </div>
       );
     }
