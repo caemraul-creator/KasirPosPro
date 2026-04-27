@@ -987,13 +987,44 @@
 
       const numPad = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
 
+      const [tapCount, setTapCount] = useState(0);
+      const [showReset, setShowReset] = useState(false);
+
+      const handleLogoTap = () => {
+        const next = tapCount + 1;
+        setTapCount(next);
+        if (next >= 5) { setShowReset(true); setTapCount(0); }
+      };
+
+      const handleResetPin = () => {
+        if (!confirm('Reset semua PIN ke default (1234)? Lakukan ini hanya jika Anda benar-benar tidak bisa masuk.')) return;
+        // Hapus semua data user dari localStorage
+        localStorage.removeItem('kp_users');
+        // Reset Firebase users jika tersedia
+        if (useFirebase && db) {
+          USERS.forEach(u => {
+            const resetData = { ...u, pinHash: hashPin('1234'), pin: undefined };
+            delete resetData.pin;
+            db.collection('users').doc(u.id).set(resetData, { merge: true })
+              .catch(e => console.warn('Gagal reset user di Firebase:', e));
+          });
+        }
+        alert('✅ PIN semua user direset ke 1234. Silakan login ulang.');
+        window.location.reload();
+      };
+
       return (
         <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: '20px' }}>
           <div style={{ width: '100%', maxWidth: '380px' }}>
             <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-              <div style={{ fontSize: 48, marginBottom: '8px' }}>🛒</div>
+              <div style={{ fontSize: 48, marginBottom: '8px', cursor: 'pointer', userSelect: 'none' }} onClick={handleLogoTap}>🛒</div>
               <h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)', letterSpacing: '-1px' }}>KasirPro</h1>
               <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: '4px' }}>Point of Sale System v3</p>
+              {showReset && (
+                <button onClick={handleResetPin} style={{ marginTop: '10px', background: 'none', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: '6px', padding: '4px 12px', fontSize: 12, cursor: 'pointer' }}>
+                  🔑 Reset PIN ke Default (1234)
+                </button>
+              )}
             </div>
             <div className="card" style={{ padding: '28px' }}>
               <div style={{ marginBottom: '20px' }}>
