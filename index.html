@@ -945,11 +945,27 @@
                 pin: lu?.pin || ru.pin,
               };
             });
-            // Konversi legacy PIN ke hash jika perlu
+            // Konversi legacy PIN ke hash, dan pastikan semua user punya pinHash
+            const needsFirebaseUpdate = [];
             const finalUsers = merged.map(u => {
-              if (!u.pinHash && u.pin) return { ...u, pinHash: hashPin(u.pin) };
+              if (!u.pinHash && u.pin) {
+                return { ...u, pinHash: hashPin(u.pin) };
+              }
+              // Jika sama sekali tidak ada pinHash maupun pin, beri default 1234
+              if (!u.pinHash && !u.pin) {
+                const fixed = { ...u, pinHash: hashPin('1234') };
+                needsFirebaseUpdate.push(fixed);
+                return fixed;
+              }
               return u;
             });
+            // Simpan pinHash ke Firebase untuk user yang belum punya
+            if (useFirebase && db && needsFirebaseUpdate.length > 0) {
+              needsFirebaseUpdate.forEach(u => {
+                db.collection('users').doc(u.id).set({ pinHash: u.pinHash }, { merge: true })
+                  .catch(e => console.warn('Gagal update pinHash:', e));
+              });
+            }
             LS.set('users', finalUsers);
             setUsersState(finalUsers);
             if (finalUsers.length > 0) setSelUser(prev => finalUsers.find(u => u.id === prev) ? prev : finalUsers[0].id);
@@ -1007,7 +1023,7 @@
         });
 
         // Simpan ke localStorage DULU sebelum reload — ini yang jadi sumber kebenaran
-        localStorage.setItem('kp_users', JSON.stringify(resetUsers));
+        LS.set('users', resetUsers);
 
         // Update Firebase juga (tidak perlu tunggu selesai)
         if (useFirebase && db) {
@@ -2790,8 +2806,8 @@
                 <h3 style={{ fontWeight: 700, marginBottom: '12px' }}>🗑️ Reset Data</h3>
                 <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: '12px' }}>Hapus semua data dari penyimpanan lokal. Tidak dapat dibatalkan!</p>
                 <button className="btn btn-danger" onClick={() => {
-                  if (confirm('YAKIN? Semua data akan dihapus permanen!')) {
-                    ['transactions', 'products', 'members', 'debts', 'dailyProfits', 'users'].forEach(k => LS.set(k, []));
+                  if (confirm('YAKIN? Semua data transaksi akan dihapus permanen!')) {
+                    ['transactions', 'products', 'members', 'debts', 'dailyProfits'].forEach(k => LS.set(k, []));
                     window.location.reload();
                   }
                 }}>⚠️ Reset Semua Data</button>
@@ -2927,8 +2943,7 @@
             // Untuk users, jangan kirim data PIN
             if (collection === 'users') {
               const safeUser = { ...item };
-              delete safeUser.pin;
-              delete safeUser.pinHash;
+              delete safeUser.pin; // hapus plain PIN, tapi pinHash tetap disimpan
               const ref = db.collection(collection).doc(item.id);
               batch.set(ref, safeUser, { merge: true });
             } else {
@@ -2941,8 +2956,7 @@
         else if (typeof data === 'object' && data.id) {
           if (collection === 'users') {
             const safeUser = { ...data };
-            delete safeUser.pin;
-            delete safeUser.pinHash;
+            delete safeUser.pin; // hapus plain PIN, tapi pinHash tetap disimpan
             const ref = db.collection(collection).doc(data.id);
             batch.set(ref, safeUser, { merge: true });
           } else {
@@ -3016,8 +3030,6 @@
 
         setTransactions(prev => {
           const next = [tx, ...prev];
-          const limited = next.slice(0, STORAGE_LIMITS.maxTransactions);
-          LS.set('transactions', limited);
           if (useFirebase) db?.collection('transactions').doc(tx.id).set(tx);
           syncToGoogleSheets('ADD_TRANSACTION', tx).catch(() => {
             console.log('Transaksi masuk antrean offline');

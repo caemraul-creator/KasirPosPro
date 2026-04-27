@@ -18,15 +18,17 @@ const APP_SECRET = (function () {
   for (let i = 0; i < 32; i++) {
     secret += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  if (typeof sessionStorage !== 'undefined') {
-    const existing = sessionStorage.getItem('kp_app_secret');
+  // Gunakan localStorage agar kunci tetap sama lintas sesi & tab
+  // (sessionStorage terhapus saat tab ditutup → enkripsi rusak)
+  if (typeof localStorage !== 'undefined') {
+    const existing = localStorage.getItem('kp_app_secret');
     if (existing) return existing;
-    sessionStorage.setItem('kp_app_secret', secret);
+    localStorage.setItem('kp_app_secret', secret);
   }
   return secret;
 })();
 
-// Data pengguna default (PIN akan di-hash saat disimpan)
+// Data pengguna default
 const USERS = [
   {
     id: 'u1',
@@ -35,7 +37,6 @@ const USERS = [
     role: 'admin',
     pin: '1234',
     outlet: 'Pusat',
-    mustChangePin: true
   },
   {
     id: 'u2',
@@ -44,7 +45,6 @@ const USERS = [
     role: 'kasir',
     pin: '1234',
     outlet: 'Pusat',
-    mustChangePin: true
   },
   {
     id: 'u3',
@@ -53,6 +53,5 @@ const USERS = [
     role: 'supervisor',
     pin: '1234',
     outlet: 'Pusat',
-    mustChangePin: true
   }
 ];
