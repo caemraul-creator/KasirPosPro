@@ -2900,6 +2900,8 @@
     // ═══════════════════════════════════════════════════
     // GOOGLE SHEETS SYNC (with token & offline queue)
     // ═══════════════════════════════════════════════════
+    // [BUG FIX #7] Improved error detection for Google Sheets sync
+    // no-cors selalu resolve, jadi kita gunakan timeout + error pada network failure
     function syncToGoogleSheets(action, payload) {
       return new Promise((resolve, reject) => {
         if (typeof GOOGLE_SHEET_URL === 'undefined' || !GOOGLE_SHEET_URL.startsWith('http')) {
@@ -2912,24 +2914,40 @@
           payload,
           token: APP_SECRET,
           timestamp: Date.now(),
-          version: '3.0'
+          version: '3.1'
         };
 
         try {
+          // Gunakan timeout 10 detik untuk mendeteksi masalah jaringan
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+
           fetch(GOOGLE_SHEET_URL, {
             method: 'POST',
             mode: 'no-cors',
+            signal: controller.signal,
             body: JSON.stringify(securePayload)
           })
-            .then(() => resolve())
+            .then((response) => {
+              clearTimeout(timeoutId);
+              // no-cors response type selalu 'opaque', tapi jika sampai sini berarti
+              // request terkirim. Resolve berhasil.
+              resolve(response);
+            })
             .catch((error) => {
+              clearTimeout(timeoutId);
               console.error('Google Sheets Sync Error:', error);
-              if (!navigator.onLine) {
+              // Jika offline, masukkan ke antrean
+              if (!navigator.onLine || error.name === 'AbortError') {
                 OfflineQueue.add(action, payload);
+                console.warn('Request diantrekan untuk sinkronisasi offline');
               }
               reject(error);
             });
         } catch (e) {
+          if (!navigator.onLine) {
+            OfflineQueue.add(action, payload);
+          }
           reject(e);
         }
       });
@@ -3046,12 +3064,9 @@
         return true;
       };
 
+      // [BUG FIX #4] addDebt double-write: LS.set sudah dipanggil oleh persist() wrapper
       const addDebt = (debt) => {
-        setDebts(prev => {
-          const next = [debt, ...prev];
-          LS.set('debts', next);
-          return next;
-        });
+        setDebts(prev => [debt, ...prev]);
       };
 
       const addToast = (msg, color = 'var(--success)', icon = 'ℹ️', title = '') => {

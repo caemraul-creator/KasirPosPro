@@ -9,7 +9,7 @@ const FIREBASE_CONFIG = {
 };
 
 // Konfigurasi Google Sheets Backup
-const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbxivVIWsfYkrZmogxTiPoypIZYWV47z2C5Ke_jif4ZGhVnFNHDVfMeX-HZh5jTye71Y/exec";
+const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwmleQ0LBBD1wABZPqoeRO5esrzKJollRkftdix3VyV4wNeReaLvXJaKmtxu0ISLsTk/exec";
 
 // Secret key untuk verifikasi request ke Apps Script
 const APP_SECRET = (function () {
