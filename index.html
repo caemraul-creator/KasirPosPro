@@ -1335,10 +1335,7 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // BARCODE SCANNER MODAL (Kamera) — v3
-    //   - Android Chrome : BarcodeDetector API (native, HD)
-    //   - iOS / lainnya  : html5-qrcode + HD constraints
-    //   - Konfirmasi sebelum terima hasil (akurasi)
+    // BARCODE SCANNER MODAL — v4 (loop bug fixed)
     // ═══════════════════════════════════════════════════
     function BarcodeScannerModal({ onScan, onClose, title = 'Scan Barcode' }) {
       const videoRef = useRef(null);
@@ -1347,80 +1344,71 @@
       const rafRef = useRef(null);
       const qrObjRef = useRef(null);
       const doneRef = useRef(false);
-      const lastCodeRef = useRef(null);
-      const sameCountRef = useRef(0);
+      const lastCodeRef = useRef('');
+      const countRef = useRef(0);
 
-      const [status, setStatus] = useState('init');   // init | ready | confirm | error
+      const [status, setStatus] = useState('init');
       const [pendingCode, setPendingCode] = useState('');
       const [torch, setTorch] = useState(false);
       const [hasTorch, setHasTorch] = useState(false);
-      const useNative = 'BarcodeDetector' in window;
+      const useNative = typeof BarcodeDetector !== 'undefined';
 
-      const stopAll = useCallback(() => {
+      const stopAll = () => {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
         if (qrObjRef.current) qrObjRef.current.stop().catch(() => { });
-      }, []);
+      };
 
-      // Kode diterima — butuh 2x deteksi sama untuk konfirmasi (anti salah baca)
-      const handleDetected = useCallback((code) => {
+      const toggleTorch = async () => {
+        const track = streamRef.current && streamRef.current.getVideoTracks()[0];
+        if (!track) return;
+        try { const n = !torch; await track.applyConstraints({ advanced: [{ torch: n }] }); setTorch(n); } catch (_) { }
+      };
+
+      // Dipanggil tiap kode terdeteksi. Butuh 2x berurutan → confirm.
+      // KUNCI: tidak return early dari RAF loop, loop tetap berjalan.
+      const onCode = (code) => {
         if (doneRef.current) return;
         if (code === lastCodeRef.current) {
-          sameCountRef.current++;
+          countRef.current++;
         } else {
           lastCodeRef.current = code;
-          sameCountRef.current = 1;
+          countRef.current = 1;
         }
-        if (sameCountRef.current >= 2) {
+        if (countRef.current >= 2) {
           doneRef.current = true;
-          // Pause kamera, tampilkan layar konfirmasi
           if (rafRef.current) cancelAnimationFrame(rafRef.current);
-          if (qrObjRef.current) qrObjRef.current.pause?.();
           setPendingCode(code);
           setStatus('confirm');
         }
-      }, []);
+      };
 
-      const retryScanner = useCallback(() => {
+      const doRetry = () => {
         doneRef.current = false;
-        lastCodeRef.current = null;
-        sameCountRef.current = 0;
+        lastCodeRef.current = '';
+        countRef.current = 0;
         setPendingCode('');
         setStatus('ready');
-
         if (useNative) {
-          // Lanjutkan loop BarcodeDetector
-          const detector = new BarcodeDetector({
-            formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar']
-          });
+          const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar'] });
           let lastTs = 0;
           const tick = async () => {
             if (doneRef.current) return;
             const now = performance.now();
-            if (now - lastTs > 120 && videoRef.current?.readyState >= 2) {
+            if (now - lastTs > 100 && videoRef.current && videoRef.current.readyState >= 2) {
               lastTs = now;
               try {
                 const codes = await detector.detect(videoRef.current);
-                if (codes.length > 0) { handleDetected(codes[0].rawValue); return; }
+                if (codes.length > 0) onCode(codes[0].rawValue);
               } catch (_) { }
             }
-            rafRef.current = requestAnimationFrame(tick);
+            if (!doneRef.current) rafRef.current = requestAnimationFrame(tick);
           };
           rafRef.current = requestAnimationFrame(tick);
         } else {
-          qrObjRef.current?.resume?.();
+          if (qrObjRef.current && qrObjRef.current.resume) qrObjRef.current.resume();
         }
-      }, [handleDetected, useNative]);
-
-      const toggleTorch = useCallback(async () => {
-        const track = streamRef.current?.getVideoTracks()[0];
-        if (!track) return;
-        try {
-          const next = !torch;
-          await track.applyConstraints({ advanced: [{ torch: next }] });
-          setTorch(next);
-        } catch (_) { }
-      }, [torch]);
+      };
 
       useEffect(() => {
         doneRef.current = false;
@@ -1429,73 +1417,54 @@
           (async () => {
             try {
               const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                  facingMode: { ideal: 'environment' },
-                  width: { ideal: 1920, min: 1280 },
-                  height: { ideal: 1080, min: 720 },
-                }
+                video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
               });
               if (doneRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
               streamRef.current = stream;
-
               const track = stream.getVideoTracks()[0];
-              const caps = track?.getCapabilities?.() || {};
+              const caps = track && track.getCapabilities ? track.getCapabilities() : {};
               if (caps.torch) setHasTorch(true);
+              videoRef.current.srcObject = stream;
+              await videoRef.current.play();
+              setStatus('ready');
 
-              if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                await videoRef.current.play();
-                setStatus('ready');
-              }
-
-              const detector = new BarcodeDetector({
-                formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar']
-              });
+              const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar'] });
               let lastTs = 0;
               const tick = async () => {
                 if (doneRef.current) return;
                 const now = performance.now();
-                if (now - lastTs > 120 && videoRef.current?.readyState >= 2) {
+                if (now - lastTs > 100 && videoRef.current && videoRef.current.readyState >= 2) {
                   lastTs = now;
                   try {
                     const codes = await detector.detect(videoRef.current);
-                    if (codes.length > 0) { handleDetected(codes[0].rawValue); return; }
+                    if (codes.length > 0) onCode(codes[0].rawValue);
+                    // ← TIDAK ada return di sini; jatuh ke bawah agar RAF dijadwal ulang
                   } catch (_) { }
                 }
-                rafRef.current = requestAnimationFrame(tick);
+                if (!doneRef.current) rafRef.current = requestAnimationFrame(tick); // selalu jadwal ulang
               };
               rafRef.current = requestAnimationFrame(tick);
-            } catch (err) {
-              setStatus('error');
-            }
+            } catch (err) { setStatus('error'); }
           })();
         } else {
           if (!window.Html5Qrcode) { setStatus('error'); return; }
           const divId = 'kp-qr-' + Date.now();
-          if (qrDivRef.current) qrDivRef.current.id = divId;
+          qrDivRef.current.id = divId;
           const qr = new Html5Qrcode(divId);
           qrObjRef.current = qr;
           qr.start(
             { facingMode: 'environment' },
             {
-              fps: 15,
-              qrbox: { width: 260, height: 110 },
-              videoConstraints: {
-                facingMode: { ideal: 'environment' },
-                width: { ideal: 1280, min: 640 },
-                height: { ideal: 720, min: 480 },
-              },
-              formatsToSupport: [
-                Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-                Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-                Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
-                Html5QrcodeSupportedFormats.QR_CODE,
-              ],
+              fps: 12, qrbox: { width: 250, height: 100 },
+              videoConstraints: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+              formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+              Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+              Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.QR_CODE]
             },
-            (code) => handleDetected(code),
+            (code) => onCode(code),
             () => { }
-          ).then(() => setStatus('ready'))
-            .catch(() => setStatus('error'));
+          ).then(() => setStatus('ready')).catch(() => setStatus('error'));
         }
         return () => { doneRef.current = true; stopAll(); };
       }, []);
@@ -1503,7 +1472,6 @@
       return (
         <div className="modal-overlay" onClick={onClose}>
           <div className="modal" style={{ maxWidth: 400, padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-            {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
               <span style={{ fontWeight: 700, fontSize: 15 }}>📷 {title}</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1516,28 +1484,25 @@
               </div>
             </div>
 
-            {/* Viewport / Konfirmasi */}
             {status === 'confirm' ? (
               <div style={{ padding: 24 }}>
                 <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                  <div style={{ fontSize: 40, marginBottom: 8 }}>✅</div>
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Barcode terdeteksi!</div>
-                  <div style={{ background: 'var(--card2)', border: '2px solid var(--primary)', borderRadius: 10, padding: '14px 20px', display: 'inline-block', minWidth: 200 }}>
-                    <span className="mono" style={{ fontSize: 20, fontWeight: 800, letterSpacing: 2, color: 'var(--primary)' }}>{pendingCode}</span>
+                  <div style={{ fontSize: 38, marginBottom: 8 }}>✅</div>
+                  <div style={{ fontWeight: 700, marginBottom: 10 }}>Barcode terdeteksi!</div>
+                  <div style={{ background: 'var(--card2)', border: '2px solid var(--primary)', borderRadius: 10, padding: '12px 20px', display: 'inline-block' }}>
+                    <span className="mono" style={{ fontSize: 22, fontWeight: 800, letterSpacing: 2, color: 'var(--primary)' }}>{pendingCode}</span>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>Pastikan kode sudah benar sebelum melanjutkan</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>Pastikan kode sudah benar</div>
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="btn btn-ghost" style={{ flex: 1 }} onClick={retryScanner}>🔄 Scan Ulang</button>
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => { stopAll(); onScan(pendingCode); }}>
-                    ✅ Gunakan Kode Ini
-                  </button>
+                  <button className="btn btn-ghost" style={{ flex: 1 }} onClick={doRetry}>🔄 Scan Ulang</button>
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => { stopAll(); onScan(pendingCode); }}>✅ Gunakan</button>
                 </div>
               </div>
             ) : status === 'error' ? (
               <div style={{ padding: 20 }}>
-                <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, padding: '14px', fontSize: 13, color: 'var(--danger)', marginBottom: 12 }}>
-                  ⚠️ Gagal membuka kamera. Pastikan izin kamera sudah diberikan dan coba refresh halaman.
+                <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, padding: 14, fontSize: 13, color: 'var(--danger)', marginBottom: 12 }}>
+                  ⚠️ Gagal membuka kamera. Pastikan izin kamera sudah diberikan.
                 </div>
                 <button className="btn btn-ghost" style={{ width: '100%' }} onClick={onClose}>Tutup</button>
               </div>
@@ -1549,11 +1514,10 @@
                       <video ref={videoRef} style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} playsInline muted autoPlay />
                       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
                         <div style={{ width: 270, height: 110, border: '2.5px solid var(--primary)', borderRadius: 10, boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)', position: 'relative' }}>
-                          {[
-                            { top: -2, left: -2, borderTop: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '8px 0 0 0' },
-                            { top: -2, right: -2, borderTop: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 8px 0 0' },
-                            { bottom: -2, left: -2, borderBottom: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '0 0 0 8px' },
-                            { bottom: -2, right: -2, borderBottom: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 0 8px 0' },
+                          {[{ top: -2, left: -2, borderTop: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '8px 0 0 0' },
+                          { top: -2, right: -2, borderTop: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 8px 0 0' },
+                          { bottom: -2, left: -2, borderBottom: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '0 0 0 8px' },
+                          { bottom: -2, right: -2, borderBottom: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 0 8px 0' }
                           ].map((s, i) => <div key={i} style={{ position: 'absolute', width: 22, height: 22, ...s }} />)}
                         </div>
                       </div>
@@ -1563,9 +1527,9 @@
                   )}
                 </div>
                 <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                     {status === 'init' ? '⏳ Memulai kamera...' : '🔍 Arahkan ke barcode...'}
-                  </p>
+                  </span>
                   <button className="btn btn-ghost btn-sm" onClick={onClose}>Tutup</button>
                 </div>
               </>
@@ -1574,7 +1538,6 @@
         </div>
       );
     }
-
     // ═══════════════════════════════════════════════════
     // POS TERMINAL (with stock validation)
     // ═══════════════════════════════════════════════════
