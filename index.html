@@ -1338,76 +1338,34 @@
     // BARCODE SCANNER MODAL — v4 (loop bug fixed)
     // ═══════════════════════════════════════════════════
     function BarcodeScannerModal({ onScan, onClose, title = 'Scan Barcode' }) {
-      const videoRef = useRef(null);
-      const qrDivRef = useRef(null);
-      const streamRef = useRef(null);
-      const rafRef = useRef(null);
-      const qrObjRef = useRef(null);
-      const doneRef = useRef(false);
-      const lastCodeRef = useRef('');
-      const countRef = useRef(0);
-
-      const [status, setStatus] = useState('init');
-      const [pendingCode, setPendingCode] = useState('');
-      const [torch, setTorch] = useState(false);
+      const videoRef    = useRef(null);
+      const qrDivRef    = useRef(null);
+      const streamRef   = useRef(null);
+      const rafRef      = useRef(null);
+      const qrObjRef    = useRef(null);
+      const doneRef     = useRef(false);
+      const [status, setStatus]     = useState('init');
+      const [torch, setTorch]       = useState(false);
       const [hasTorch, setHasTorch] = useState(false);
       const useNative = typeof BarcodeDetector !== 'undefined';
 
       const stopAll = () => {
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        if (rafRef.current)    cancelAnimationFrame(rafRef.current);
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-        if (qrObjRef.current) qrObjRef.current.stop().catch(() => { });
+        if (qrObjRef.current)  qrObjRef.current.stop().catch(() => {});
       };
 
       const toggleTorch = async () => {
         const track = streamRef.current && streamRef.current.getVideoTracks()[0];
         if (!track) return;
-        try { const n = !torch; await track.applyConstraints({ advanced: [{ torch: n }] }); setTorch(n); } catch (_) { }
+        try { const n = !torch; await track.applyConstraints({ advanced: [{ torch: n }] }); setTorch(n); } catch(_) {}
       };
 
-      // Dipanggil tiap kode terdeteksi. Butuh 2x berurutan → confirm.
-      // KUNCI: tidak return early dari RAF loop, loop tetap berjalan.
       const onCode = (code) => {
         if (doneRef.current) return;
-        if (code === lastCodeRef.current) {
-          countRef.current++;
-        } else {
-          lastCodeRef.current = code;
-          countRef.current = 1;
-        }
-        if (countRef.current >= 2) {
-          doneRef.current = true;
-          if (rafRef.current) cancelAnimationFrame(rafRef.current);
-          setPendingCode(code);
-          setStatus('confirm');
-        }
-      };
-
-      const doRetry = () => {
-        doneRef.current = false;
-        lastCodeRef.current = '';
-        countRef.current = 0;
-        setPendingCode('');
-        setStatus('ready');
-        if (useNative) {
-          const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar'] });
-          let lastTs = 0;
-          const tick = async () => {
-            if (doneRef.current) return;
-            const now = performance.now();
-            if (now - lastTs > 100 && videoRef.current && videoRef.current.readyState >= 2) {
-              lastTs = now;
-              try {
-                const codes = await detector.detect(videoRef.current);
-                if (codes.length > 0) onCode(codes[0].rawValue);
-              } catch (_) { }
-            }
-            if (!doneRef.current) rafRef.current = requestAnimationFrame(tick);
-          };
-          rafRef.current = requestAnimationFrame(tick);
-        } else {
-          if (qrObjRef.current && qrObjRef.current.resume) qrObjRef.current.resume();
-        }
+        doneRef.current = true;
+        stopAll();
+        onScan(code);
       };
 
       useEffect(() => {
@@ -1428,7 +1386,7 @@
               await videoRef.current.play();
               setStatus('ready');
 
-              const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar'] });
+              const detector = new BarcodeDetector({ formats: ['ean_13','ean_8','code_128','code_39','upc_a','upc_e','qr_code','itf','codabar'] });
               let lastTs = 0;
               const tick = async () => {
                 if (doneRef.current) return;
@@ -1439,12 +1397,12 @@
                     const codes = await detector.detect(videoRef.current);
                     if (codes.length > 0) onCode(codes[0].rawValue);
                     // ← TIDAK ada return di sini; jatuh ke bawah agar RAF dijadwal ulang
-                  } catch (_) { }
+                  } catch(_) {}
                 }
                 if (!doneRef.current) rafRef.current = requestAnimationFrame(tick); // selalu jadwal ulang
               };
               rafRef.current = requestAnimationFrame(tick);
-            } catch (err) { setStatus('error'); }
+            } catch(err) { setStatus('error'); }
           })();
         } else {
           if (!window.Html5Qrcode) { setStatus('error'); return; }
@@ -1454,16 +1412,14 @@
           qrObjRef.current = qr;
           qr.start(
             { facingMode: 'environment' },
-            {
-              fps: 12, qrbox: { width: 250, height: 100 },
+            { fps: 12, qrbox: { width: 250, height: 100 },
               videoConstraints: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
               formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-              Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-              Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
-              Html5QrcodeSupportedFormats.QR_CODE]
-            },
+                Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.QR_CODE] },
             (code) => onCode(code),
-            () => { }
+            () => {}
           ).then(() => setStatus('ready')).catch(() => setStatus('error'));
         }
         return () => { doneRef.current = true; stopAll(); };
@@ -1484,22 +1440,7 @@
               </div>
             </div>
 
-            {status === 'confirm' ? (
-              <div style={{ padding: 24 }}>
-                <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                  <div style={{ fontSize: 38, marginBottom: 8 }}>✅</div>
-                  <div style={{ fontWeight: 700, marginBottom: 10 }}>Barcode terdeteksi!</div>
-                  <div style={{ background: 'var(--card2)', border: '2px solid var(--primary)', borderRadius: 10, padding: '12px 20px', display: 'inline-block' }}>
-                    <span className="mono" style={{ fontSize: 22, fontWeight: 800, letterSpacing: 2, color: 'var(--primary)' }}>{pendingCode}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>Pastikan kode sudah benar</div>
-                </div>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="btn btn-ghost" style={{ flex: 1 }} onClick={doRetry}>🔄 Scan Ulang</button>
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => { stopAll(); onScan(pendingCode); }}>✅ Gunakan</button>
-                </div>
-              </div>
-            ) : status === 'error' ? (
+            {status === 'error' ? (
               <div style={{ padding: 20 }}>
                 <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, padding: 14, fontSize: 13, color: 'var(--danger)', marginBottom: 12 }}>
                   ⚠️ Gagal membuka kamera. Pastikan izin kamera sudah diberikan.
@@ -1514,11 +1455,11 @@
                       <video ref={videoRef} style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} playsInline muted autoPlay />
                       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
                         <div style={{ width: 270, height: 110, border: '2.5px solid var(--primary)', borderRadius: 10, boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)', position: 'relative' }}>
-                          {[{ top: -2, left: -2, borderTop: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '8px 0 0 0' },
-                          { top: -2, right: -2, borderTop: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 8px 0 0' },
-                          { bottom: -2, left: -2, borderBottom: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '0 0 0 8px' },
-                          { bottom: -2, right: -2, borderBottom: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 0 8px 0' }
-                          ].map((s, i) => <div key={i} style={{ position: 'absolute', width: 22, height: 22, ...s }} />)}
+                          {[{top:-2,left:-2,borderTop:'3px solid #fff',borderLeft:'3px solid #fff',borderRadius:'8px 0 0 0'},
+                            {top:-2,right:-2,borderTop:'3px solid #fff',borderRight:'3px solid #fff',borderRadius:'0 8px 0 0'},
+                            {bottom:-2,left:-2,borderBottom:'3px solid #fff',borderLeft:'3px solid #fff',borderRadius:'0 0 0 8px'},
+                            {bottom:-2,right:-2,borderBottom:'3px solid #fff',borderRight:'3px solid #fff',borderRadius:'0 0 8px 0'}
+                          ].map((s,i) => <div key={i} style={{ position:'absolute', width:22, height:22, ...s }} />)}
                         </div>
                       </div>
                     </>
@@ -2118,21 +2059,21 @@
             </div>
           </div>
           {showForm && <ProductForm item={editItem} onClose={() => setShowForm(false)}
-            onEditExisting={(existing) => { setEditItem({ ...existing, _focusExpiry: true }); }}
+            onEditExisting={(existing) => { setEditItem({...existing, _focusExpiry: true}); }}
             focusExpiry={!!editItem?._focusExpiry}
             onSave={(data) => {
-              if (editItem) {
-                const updated = { ...editItem, ...data };
-                setProducts(prev => prev.map(p => p.id === editItem.id ? updated : p));
-                syncToGoogleSheets('UPDATE_PRODUCT', updated);
-              } else {
-                const newProduct = { ...data, id: uid() };
-                setProducts(prev => [...prev, newProduct]);
-                syncToGoogleSheets('ADD_PRODUCT', newProduct);
-              }
-              setShowForm(false);
-              addToast(editItem ? 'Produk diperbarui' : 'Produk ditambahkan', 'var(--success)', '✅');
-            }} />}
+            if (editItem) {
+              const updated = { ...editItem, ...data };
+              setProducts(prev => prev.map(p => p.id === editItem.id ? updated : p));
+              syncToGoogleSheets('UPDATE_PRODUCT', updated);
+            } else {
+              const newProduct = { ...data, id: uid() };
+              setProducts(prev => [...prev, newProduct]);
+              syncToGoogleSheets('ADD_PRODUCT', newProduct);
+            }
+            setShowForm(false);
+            addToast(editItem ? 'Produk diperbarui' : 'Produk ditambahkan', 'var(--success)', '✅');
+          }} />}
           {showStockIn && (
             <StockInModal
               product={showStockIn}
@@ -2312,22 +2253,22 @@
                     <div className="label" style={f.isExpiry && focusExpiry ? { color: 'var(--primary)' } : {}}>{f.l}</div>
                     {f.type === 'select'
                       ? <select className="input select" value={form[f.k]} onChange={e => set(f.k, e.target.value)}>
-                        {f.opts.map(o => <option key={o}>{o}</option>)}
-                      </select>
+                          {f.opts.map(o => <option key={o}>{o}</option>)}
+                        </select>
                       : f.isBarcodeField
                         ? <div style={{ display: 'flex', gap: 6 }}>
-                          <input className="input" type="text" placeholder={f.ph} value={form[f.k]} onChange={e => { setDupResolved(false); set(f.k, e.target.value); }} style={{ flex: 1 }} />
-                          <button type="button" className="btn btn-ghost" title="Scan barcode via kamera" onClick={() => setShowBarcodeScanner(true)} style={{ padding: '8px 10px', flexShrink: 0 }}>📷</button>
-                        </div>
+                            <input className="input" type="text" placeholder={f.ph} value={form[f.k]} onChange={e => { setDupResolved(false); set(f.k, e.target.value); }} style={{ flex: 1 }} />
+                            <button type="button" className="btn btn-ghost" title="Scan barcode via kamera" onClick={() => setShowBarcodeScanner(true)} style={{ padding: '8px 10px', flexShrink: 0 }}>📷</button>
+                          </div>
                         : <input
-                          ref={f.isExpiry ? expiryRef : undefined}
-                          className="input"
-                          type={f.type || 'text'}
-                          placeholder={f.ph}
-                          value={form[f.k]}
-                          onChange={e => set(f.k, e.target.value)}
-                          style={f.isExpiry && focusExpiry ? { borderColor: 'var(--primary)', boxShadow: '0 0 0 3px rgba(245,158,11,.2)' } : {}}
-                        />
+                            ref={f.isExpiry ? expiryRef : undefined}
+                            className="input"
+                            type={f.type || 'text'}
+                            placeholder={f.ph}
+                            value={form[f.k]}
+                            onChange={e => set(f.k, e.target.value)}
+                            style={f.isExpiry && focusExpiry ? { borderColor: 'var(--primary)', boxShadow: '0 0 0 3px rgba(245,158,11,.2)' } : {}}
+                          />
                     }
                   </div>
                 ))}
