@@ -1335,9 +1335,10 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // BARCODE SCANNER MODAL (Kamera) — v2
-    //   Android Chrome : BarcodeDetector API (native, HD)
-    //   iOS / lainnya  : html5-qrcode + video constraint HD
+    // BARCODE SCANNER MODAL (Kamera) — v3
+    //   - Android Chrome : BarcodeDetector API (native, HD)
+    //   - iOS / lainnya  : html5-qrcode + HD constraints
+    //   - Konfirmasi sebelum terima hasil (akurasi)
     // ═══════════════════════════════════════════════════
     function BarcodeScannerModal({ onScan, onClose, title = 'Scan Barcode' }) {
       const videoRef = useRef(null);
@@ -1346,21 +1347,71 @@
       const rafRef = useRef(null);
       const qrObjRef = useRef(null);
       const doneRef = useRef(false);
+      const lastCodeRef = useRef(null);
+      const sameCountRef = useRef(0);
 
-      const [status, setStatus] = useState('init');  // init | ready | error
-      const [errMsg, setErrMsg] = useState('');
+      const [status, setStatus] = useState('init');   // init | ready | confirm | error
+      const [pendingCode, setPendingCode] = useState('');
       const [torch, setTorch] = useState(false);
       const [hasTorch, setHasTorch] = useState(false);
       const useNative = 'BarcodeDetector' in window;
 
-      // ── stop semua resource ──
       const stopAll = useCallback(() => {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
         if (qrObjRef.current) qrObjRef.current.stop().catch(() => { });
       }, []);
 
-      // ── toggle senter ──
+      // Kode diterima — butuh 2x deteksi sama untuk konfirmasi (anti salah baca)
+      const handleDetected = useCallback((code) => {
+        if (doneRef.current) return;
+        if (code === lastCodeRef.current) {
+          sameCountRef.current++;
+        } else {
+          lastCodeRef.current = code;
+          sameCountRef.current = 1;
+        }
+        if (sameCountRef.current >= 2) {
+          doneRef.current = true;
+          // Pause kamera, tampilkan layar konfirmasi
+          if (rafRef.current) cancelAnimationFrame(rafRef.current);
+          if (qrObjRef.current) qrObjRef.current.pause?.();
+          setPendingCode(code);
+          setStatus('confirm');
+        }
+      }, []);
+
+      const retryScanner = useCallback(() => {
+        doneRef.current = false;
+        lastCodeRef.current = null;
+        sameCountRef.current = 0;
+        setPendingCode('');
+        setStatus('ready');
+
+        if (useNative) {
+          // Lanjutkan loop BarcodeDetector
+          const detector = new BarcodeDetector({
+            formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar']
+          });
+          let lastTs = 0;
+          const tick = async () => {
+            if (doneRef.current) return;
+            const now = performance.now();
+            if (now - lastTs > 120 && videoRef.current?.readyState >= 2) {
+              lastTs = now;
+              try {
+                const codes = await detector.detect(videoRef.current);
+                if (codes.length > 0) { handleDetected(codes[0].rawValue); return; }
+              } catch (_) { }
+            }
+            rafRef.current = requestAnimationFrame(tick);
+          };
+          rafRef.current = requestAnimationFrame(tick);
+        } else {
+          qrObjRef.current?.resume?.();
+        }
+      }, [handleDetected, useNative]);
+
       const toggleTorch = useCallback(async () => {
         const track = streamRef.current?.getVideoTracks()[0];
         if (!track) return;
@@ -1368,13 +1419,12 @@
           const next = !torch;
           await track.applyConstraints({ advanced: [{ torch: next }] });
           setTorch(next);
-        } catch (e) { }
+        } catch (_) { }
       }, [torch]);
 
       useEffect(() => {
         doneRef.current = false;
 
-        // ── ANDROID / Chrome/Edge : BarcodeDetector API ──
         if (useNative) {
           (async () => {
             try {
@@ -1388,7 +1438,6 @@
               if (doneRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
               streamRef.current = stream;
 
-              // cek kemampuan torch
               const track = stream.getVideoTracks()[0];
               const caps = track?.getCapabilities?.() || {};
               if (caps.torch) setHasTorch(true);
@@ -1399,9 +1448,9 @@
                 setStatus('ready');
               }
 
-              const formats = ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar'];
-              const detector = new BarcodeDetector({ formats });
-
+              const detector = new BarcodeDetector({
+                formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf', 'codabar']
+              });
               let lastTs = 0;
               const tick = async () => {
                 if (doneRef.current) return;
@@ -1410,37 +1459,22 @@
                   lastTs = now;
                   try {
                     const codes = await detector.detect(videoRef.current);
-                    if (codes.length > 0 && !doneRef.current) {
-                      doneRef.current = true;
-                      stopAll();
-                      onScan(codes[0].rawValue);
-                      return;
-                    }
+                    if (codes.length > 0) { handleDetected(codes[0].rawValue); return; }
                   } catch (_) { }
                 }
                 rafRef.current = requestAnimationFrame(tick);
               };
               rafRef.current = requestAnimationFrame(tick);
-
             } catch (err) {
               setStatus('error');
-              setErrMsg('Gagal membuka kamera: ' + (err.message || String(err)));
             }
           })();
-
-          // ── iOS / Firefox / lainnya : html5-qrcode dengan HD constraints ──
         } else {
-          if (!window.Html5Qrcode) {
-            setStatus('error');
-            setErrMsg('Library scanner tidak tersedia. Coba refresh halaman.');
-            return;
-          }
+          if (!window.Html5Qrcode) { setStatus('error'); return; }
           const divId = 'kp-qr-' + Date.now();
           if (qrDivRef.current) qrDivRef.current.id = divId;
-
           const qr = new Html5Qrcode(divId);
           qrObjRef.current = qr;
-
           qr.start(
             { facingMode: 'environment' },
             {
@@ -1458,20 +1492,11 @@
                 Html5QrcodeSupportedFormats.QR_CODE,
               ],
             },
-            (code) => {
-              if (doneRef.current) return;
-              doneRef.current = true;
-              stopAll();
-              onScan(code);
-            },
+            (code) => handleDetected(code),
             () => { }
           ).then(() => setStatus('ready'))
-            .catch(err => {
-              setStatus('error');
-              setErrMsg('Gagal membuka kamera: ' + (err.message || String(err)));
-            });
+            .catch(() => setStatus('error'));
         }
-
         return () => { doneRef.current = true; stopAll(); };
       }, []);
 
@@ -1482,10 +1507,8 @@
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
               <span style={{ fontWeight: 700, fontSize: 15 }}>📷 {title}</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {hasTorch && (
-                  <button className="btn btn-ghost btn-sm" onClick={toggleTorch} style={{ fontSize: 13 }}>
-                    {torch ? '🔦 ON' : '🔦 OFF'}
-                  </button>
+                {hasTorch && status !== 'confirm' && (
+                  <button className="btn btn-ghost btn-sm" onClick={toggleTorch}>{torch ? '🔦 ON' : '🔦 OFF'}</button>
                 )}
                 <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}>
                   <Icon name="x" size={18} />
@@ -1493,57 +1516,60 @@
               </div>
             </div>
 
-            {/* Viewport */}
-            <div style={{ background: '#000', position: 'relative', minHeight: 240 }}>
-              {status === 'error' ? (
-                <div style={{ padding: 20, color: 'var(--danger)', fontSize: 13 }}>
-                  ⚠️ {errMsg}
-                </div>
-              ) : useNative ? (
-                // Native BarcodeDetector — video langsung
-                <>
-                  <video
-                    ref={videoRef}
-                    style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }}
-                    playsInline muted autoPlay
-                  />
-                  {/* Kotak target scan */}
-                  <div style={{
-                    position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none'
-                  }}>
-                    <div style={{
-                      width: 270, height: 110,
-                      border: '2.5px solid var(--primary)',
-                      borderRadius: 10,
-                      boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
-                    }}>
-                      {/* sudut animasi */}
-                      {[
-                        { top: -2, left: -2, borderTop: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '8px 0 0 0' },
-                        { top: -2, right: -2, borderTop: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 8px 0 0' },
-                        { bottom: -2, left: -2, borderBottom: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '0 0 0 8px' },
-                        { bottom: -2, right: -2, borderBottom: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 0 8px 0' },
-                      ].map((s, i) => (
-                        <div key={i} style={{ position: 'absolute', width: 22, height: 22, ...s }} />
-                      ))}
-                    </div>
+            {/* Viewport / Konfirmasi */}
+            {status === 'confirm' ? (
+              <div style={{ padding: 24 }}>
+                <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>✅</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Barcode terdeteksi!</div>
+                  <div style={{ background: 'var(--card2)', border: '2px solid var(--primary)', borderRadius: 10, padding: '14px 20px', display: 'inline-block', minWidth: 200 }}>
+                    <span className="mono" style={{ fontSize: 20, fontWeight: 800, letterSpacing: 2, color: 'var(--primary)' }}>{pendingCode}</span>
                   </div>
-                </>
-              ) : (
-                // html5-qrcode fallback (iOS)
-                <div ref={qrDivRef} style={{ width: '100%' }} />
-              )}
-            </div>
-
-            {/* Footer */}
-            <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
-                {status === 'init' ? '⏳ Memulai kamera...'
-                  : status === 'ready' ? '🔍 Arahkan ke barcode...'
-                    : ''}
-              </p>
-              <button className="btn btn-ghost btn-sm" onClick={onClose}>Tutup</button>
-            </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>Pastikan kode sudah benar sebelum melanjutkan</div>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn btn-ghost" style={{ flex: 1 }} onClick={retryScanner}>🔄 Scan Ulang</button>
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => { stopAll(); onScan(pendingCode); }}>
+                    ✅ Gunakan Kode Ini
+                  </button>
+                </div>
+              </div>
+            ) : status === 'error' ? (
+              <div style={{ padding: 20 }}>
+                <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, padding: '14px', fontSize: 13, color: 'var(--danger)', marginBottom: 12 }}>
+                  ⚠️ Gagal membuka kamera. Pastikan izin kamera sudah diberikan dan coba refresh halaman.
+                </div>
+                <button className="btn btn-ghost" style={{ width: '100%' }} onClick={onClose}>Tutup</button>
+              </div>
+            ) : (
+              <>
+                <div style={{ background: '#000', position: 'relative', minHeight: 240 }}>
+                  {useNative ? (
+                    <>
+                      <video ref={videoRef} style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} playsInline muted autoPlay />
+                      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                        <div style={{ width: 270, height: 110, border: '2.5px solid var(--primary)', borderRadius: 10, boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)', position: 'relative' }}>
+                          {[
+                            { top: -2, left: -2, borderTop: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '8px 0 0 0' },
+                            { top: -2, right: -2, borderTop: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 8px 0 0' },
+                            { bottom: -2, left: -2, borderBottom: '3px solid #fff', borderLeft: '3px solid #fff', borderRadius: '0 0 0 8px' },
+                            { bottom: -2, right: -2, borderBottom: '3px solid #fff', borderRight: '3px solid #fff', borderRadius: '0 0 8px 0' },
+                          ].map((s, i) => <div key={i} style={{ position: 'absolute', width: 22, height: 22, ...s }} />)}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div ref={qrDivRef} style={{ width: '100%' }} />
+                  )}
+                </div>
+                <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
+                    {status === 'init' ? '⏳ Memulai kamera...' : '🔍 Arahkan ke barcode...'}
+                  </p>
+                  <button className="btn btn-ghost btn-sm" onClick={onClose}>Tutup</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       );
@@ -2128,19 +2154,22 @@
               {filtered.length === 0 && <div style={{ padding: '40px', textAlign: 'center', color: 'var(--dim)' }}>Tidak ada produk ditemukan</div>}
             </div>
           </div>
-          {showForm && <ProductForm item={editItem} onClose={() => setShowForm(false)} onSave={(data) => {
-            if (editItem) {
-              const updated = { ...editItem, ...data };
-              setProducts(prev => prev.map(p => p.id === editItem.id ? updated : p));
-              syncToGoogleSheets('UPDATE_PRODUCT', updated);
-            } else {
-              const newProduct = { ...data, id: uid() };
-              setProducts(prev => [...prev, newProduct]);
-              syncToGoogleSheets('ADD_PRODUCT', newProduct);
-            }
-            setShowForm(false);
-            addToast(editItem ? 'Produk diperbarui' : 'Produk ditambahkan', 'var(--success)', '✅');
-          }} />}
+          {showForm && <ProductForm item={editItem} onClose={() => setShowForm(false)}
+            onEditExisting={(existing) => { setEditItem({ ...existing, _focusExpiry: true }); }}
+            focusExpiry={!!editItem?._focusExpiry}
+            onSave={(data) => {
+              if (editItem) {
+                const updated = { ...editItem, ...data };
+                setProducts(prev => prev.map(p => p.id === editItem.id ? updated : p));
+                syncToGoogleSheets('UPDATE_PRODUCT', updated);
+              } else {
+                const newProduct = { ...data, id: uid() };
+                setProducts(prev => [...prev, newProduct]);
+                syncToGoogleSheets('ADD_PRODUCT', newProduct);
+              }
+              setShowForm(false);
+              addToast(editItem ? 'Produk diperbarui' : 'Produk ditambahkan', 'var(--success)', '✅');
+            }} />}
           {showStockIn && (
             <StockInModal
               product={showStockIn}
@@ -2229,10 +2258,30 @@
       );
     }
 
-    function ProductForm({ item, onClose, onSave }) {
+    function ProductForm({ item, onClose, onSave, onEditExisting, focusExpiry = false }) {
+      const { products } = useApp();
       const [form, setForm] = useState({ name: '', barcode: '', price: '', cost: '', stock: '', minStock: '10', category: 'Makanan', expiryDate: '', ...item });
       const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+      const [dupResolved, setDupResolved] = useState(false); // user sudah pilih "simpan baru"
+      const expiryRef = useRef(null);
       const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+      // Auto-fokus field kadaluarsa jika diminta
+      useEffect(() => {
+        if (focusExpiry && expiryRef.current) {
+          setTimeout(() => {
+            expiryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            expiryRef.current?.focus();
+          }, 100);
+        }
+      }, [focusExpiry]);
+
+      // Cek duplikat barcode (kecuali produk yg sedang diedit atau sudah diresolved)
+      const dupProduct = useMemo(() => {
+        if (!form.barcode || dupResolved) return null;
+        return products.find(p => p.barcode === form.barcode && p.id !== item?.id) || null;
+      }, [form.barcode, products, item, dupResolved]);
+
       return (
         <div className="modal-overlay">
           {showBarcodeScanner && (
@@ -2248,7 +2297,44 @@
                 <h3 style={{ fontWeight: 700 }}>{item ? 'Edit' : 'Tambah'} Produk</h3>
                 <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}><Icon name="x" size={18} /></button>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+
+              {/* ── Konflik barcode: tanya user ── */}
+              {dupProduct && (
+                <div style={{ background: 'rgba(99,102,241,.08)', border: '1.5px solid rgba(99,102,241,.35)', borderRadius: 12, padding: '14px 16px', marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>🔁 Barcode ini sudah ada di produk lain</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
+                    <strong style={{ color: 'var(--text)' }}>{dupProduct.name}</strong>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+                    Kadaluarsa: <strong style={{ color: 'var(--text)' }}>{dupProduct.expiryDate || '—'}</strong>
+                    &nbsp;·&nbsp; Stok: <strong style={{ color: 'var(--text)' }}>{dupProduct.stock}</strong>
+                    &nbsp;·&nbsp; {fmt(dupProduct.price)}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Tanggal kadaluarsa berbeda?</div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => setDupResolved(true)}
+                    >
+                      ✅ Ya, beda kadaluarsa → Simpan sebagai produk baru
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => onEditExisting && onEditExisting(dupProduct)}
+                    >
+                      ✏️ Tidak, edit produk yang ada
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {focusExpiry && (
+                <div style={{ background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.4)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>
+                  📅 Barcode cocok — silakan perbarui tanggal kadaluarsa produk ini
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, opacity: dupProduct ? 0.4 : 1, pointerEvents: dupProduct ? 'none' : 'auto' }}>
                 {[
                   { l: 'Nama Produk*', k: 'name', full: true, ph: 'Nama produk' },
                   { l: 'Barcode', k: 'barcode', ph: 'Scan atau ketik barcode', isBarcodeField: true },
@@ -2257,32 +2343,46 @@
                   { l: 'Harga Pokok/HPP (Rp)*', k: 'cost', type: 'number', ph: '0' },
                   { l: 'Stok Awal*', k: 'stock', type: 'number', ph: '0' },
                   { l: 'Stok Minimum*', k: 'minStock', type: 'number', ph: '10' },
-                  { l: 'Tgl Kadaluarsa', k: 'expiryDate', type: 'date' },
+                  { l: 'Tgl Kadaluarsa', k: 'expiryDate', type: 'date', isExpiry: true },
                 ].map(f => (
                   <div key={f.k} style={{ gridColumn: f.full ? '1/-1' : 'auto' }}>
-                    <div className="label">{f.l}</div>
+                    <div className="label" style={f.isExpiry && focusExpiry ? { color: 'var(--primary)' } : {}}>{f.l}</div>
                     {f.type === 'select'
                       ? <select className="input select" value={form[f.k]} onChange={e => set(f.k, e.target.value)}>
                         {f.opts.map(o => <option key={o}>{o}</option>)}
                       </select>
                       : f.isBarcodeField
                         ? <div style={{ display: 'flex', gap: 6 }}>
-                          <input className="input" type="text" placeholder={f.ph} value={form[f.k]} onChange={e => set(f.k, e.target.value)} style={{ flex: 1 }} />
+                          <input className="input" type="text" placeholder={f.ph} value={form[f.k]} onChange={e => { setDupResolved(false); set(f.k, e.target.value); }} style={{ flex: 1 }} />
                           <button type="button" className="btn btn-ghost" title="Scan barcode via kamera" onClick={() => setShowBarcodeScanner(true)} style={{ padding: '8px 10px', flexShrink: 0 }}>📷</button>
                         </div>
-                        : <input className="input" type={f.type || 'text'} placeholder={f.ph} value={form[f.k]} onChange={e => set(f.k, e.target.value)} />
+                        : <input
+                          ref={f.isExpiry ? expiryRef : undefined}
+                          className="input"
+                          type={f.type || 'text'}
+                          placeholder={f.ph}
+                          value={form[f.k]}
+                          onChange={e => set(f.k, e.target.value)}
+                          style={f.isExpiry && focusExpiry ? { borderColor: 'var(--primary)', boxShadow: '0 0 0 3px rgba(245,158,11,.2)' } : {}}
+                        />
                     }
                   </div>
                 ))}
               </div>
-              {form.price && form.cost && (
+
+              {form.price && form.cost && !dupProduct && (
                 <div style={{ marginTop: 12, padding: '10px', background: 'rgba(16,185,129,.1)', borderRadius: '8px', border: '1px solid rgba(16,185,129,.2)', fontSize: 12 }}>
                   Margin: <strong style={{ color: 'var(--success)' }}>{fmt(form.price - form.cost)}</strong> ({form.price ? Math.round((form.price - form.cost) / form.price * 100) : 0}%)
                 </div>
               )}
+
               <div style={{ display: 'flex', gap: 8, marginTop: '20px', justifyContent: 'flex-end' }}>
                 <button className="btn btn-ghost" onClick={onClose}>Batal</button>
-                <button className="btn btn-primary" onClick={() => onSave({ ...form, price: +form.price, cost: +form.cost, stock: +form.stock, minStock: +form.minStock })}>
+                <button
+                  className="btn btn-primary"
+                  disabled={!!dupProduct}
+                  onClick={() => onSave({ ...form, price: +form.price, cost: +form.cost, stock: +form.stock, minStock: +form.minStock })}
+                >
                   <Icon name="check" size={14} /> Simpan
                 </button>
               </div>
