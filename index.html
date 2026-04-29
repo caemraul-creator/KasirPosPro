@@ -1305,7 +1305,7 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // BARCODE SCANNER MODAL — COMPLETELY FIXED
+    // BARCODE SCANNER MODAL — MOBILE FIXED v2
     // ═══════════════════════════════════════════════════
     function BarcodeScannerModal({ onScan, onClose, title = 'Scan Barcode' }) {
       const divRef = useRef(null);
@@ -1313,66 +1313,89 @@
       const doneRef = useRef(false);
       const [status, setStatus] = useState('init');
       const [errorMsg, setErrorMsg] = useState('');
+      const [scanResult, setScanResult] = useState(null); // Tampilkan hasil scan
 
       useEffect(() => {
         doneRef.current = false;
+        setScanResult(null);
         let divId = 'kp-qr-' + Date.now();
         let mounted = true;
-
+        
         const initScanner = async () => {
           try {
             if (!divRef.current || !window.Html5Qrcode) {
               if (mounted) {
                 setStatus('error');
-                setErrorMsg('Library QR Code tidak tersedia. Refresh halaman.');
+                setErrorMsg('Library QR Code tidak tersedia.');
               }
               return;
             }
-
+            
             divRef.current.id = divId;
-
-            // CRITICAL FIX: Gunakan boolean false, bukan object
+            
+            // PENTING: Gunakan verbose: false (boolean, bukan object)
             const qr = new Html5Qrcode(divId, { verbose: false });
             qrRef.current = qr;
 
-            const onScanSuccess = (decodedText, decodedResult) => {
+            const onScanSuccess = async (decodedText) => {
+              // Cegah multiple scan
               if (doneRef.current) return;
               doneRef.current = true;
+              
               console.log('✅ Barcode terdeteksi:', decodedText);
-
-              // Stop scanner dulu baru panggil callback
-              qr.stop()
-                .catch(err => console.debug('Stop error:', err))
-                .finally(() => {
-                  if (mounted) {
-                    onScan(decodedText);
-                  }
-                });
+              
+              // Tampilkan hasil scan dulu
+              if (mounted) {
+                setScanResult(decodedText);
+                setStatus('scanned');
+              }
+              
+              // HENTIKAN scanner dengan benar
+              try {
+                if (qrRef.current) {
+                  await qrRef.current.stop();
+                  // Tunggu sebentar agar kamera benar-benar mati
+                  await new Promise(resolve => setTimeout(resolve, 300));
+                }
+              } catch (stopErr) {
+                console.debug('Stop scanner error:', stopErr);
+              }
+              
+              // Panggil callback setelah scanner benar-benar berhenti
+              if (mounted && doneRef.current) {
+                onScan(decodedText);
+              }
             };
 
             const onScanError = (errorMessage) => {
-              // Html5Qrcode akan terus memanggil error saat tidak ada QR code
-              // Jangan tampilkan ke user karena normal
-              if (errorMessage && errorMessage.includes('NotFound')) {
-                return;
-              }
+              // Abaikan error "NotFound" yang normal terjadi
+              if (!errorMessage || errorMessage.includes('NotFound')) return;
               console.debug('Scan debug:', errorMessage);
             };
 
-            // Start scanning dengan konfigurasi yang tepat
+            // Konfigurasi untuk mobile
             const config = {
               fps: 10,
-              qrbox: { width: 250, height: 150 },
-              aspectRatio: 1.7777778,
-              disableFlip: false, // Izinkan mirror scanning
+              qrbox: (viewfinderWidth, viewfinderHeight) => {
+                // Responsive qrbox untuk mobile
+                const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.6;
+                return { width: size, height: size * 0.6 };
+              },
+              aspectRatio: 1.333, // 4:3 ratio lebih baik untuk mobile
+              disableFlip: false,
               videoConstraints: {
                 facingMode: { ideal: 'environment' },
-                width: { min: 640, ideal: 1280, max: 1920 },
-                height: { min: 480, ideal: 720, max: 1080 }
+                width: { min: 640, ideal: 1280 },
+                height: { min: 480, ideal: 720 },
+                // Advanced constraints untuk fokus lebih baik
+                advanced: [
+                  { focusMode: 'continuous' },
+                  { exposureMode: 'continuous' }
+                ]
               }
             };
 
-            // Coba tambahkan format support jika tersedia
+            // Tambah format support
             if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
               config.formatsToSupport = [
                 Html5QrcodeSupportedFormats.EAN_13,
@@ -1385,47 +1408,57 @@
               ];
             }
 
+            // Start kamera
             await qr.start(
               { facingMode: { ideal: 'environment' } },
               config,
               onScanSuccess,
               onScanError
             );
-
+            
             if (mounted) setStatus('ready');
-
+            
           } catch (error) {
-            console.error('Scanner initialization error:', error);
+            console.error('Scanner error:', error);
             if (mounted) {
               setStatus('error');
-
-              // Deteksi error spesifik
-              if (error.message?.includes('NotAllowedError') || error.message?.includes('Permission denied')) {
-                setErrorMsg('Izin kamera ditolak. Buka pengaturan browser.');
-              } else if (error.message?.includes('NotFoundError') || error.message?.includes('No camera')) {
-                setErrorMsg('Kamera tidak ditemukan. Pastikan perangkat memiliki kamera.');
+              
+              // Deteksi error untuk mobile
+              if (error.message?.includes('NotAllowedError')) {
+                setErrorMsg('Izin kamera ditolak. Buka Settings > Privacy > Camera.');
+              } else if (error.message?.includes('NotFoundError')) {
+                setErrorMsg('Kamera tidak ditemukan.');
               } else if (error.message?.includes('NotReadableError')) {
-                setErrorMsg('Kamera sedang digunakan aplikasi lain. Tutup aplikasi lain.');
+                setErrorMsg('Kamera sedang digunakan. Tutup aplikasi lain.');
               } else {
-                setErrorMsg(`Gagal: ${error.message || 'Error tidak diketahui'}`);
+                setErrorMsg(error.message || 'Gagal mengakses kamera');
               }
             }
           }
         };
 
-        // Delay sedikit untuk memastikan DOM siap
-        const timer = setTimeout(initScanner, 150);
+        const timer = setTimeout(initScanner, 200);
 
+        // Cleanup yang lebih agresif
         return () => {
           mounted = false;
           clearTimeout(timer);
           doneRef.current = true;
-
+          
+          // Pastikan scanner benar-benar berhenti
           if (qrRef.current) {
-            qrRef.current.stop()
-              .catch(() => { })
+            const scanner = qrRef.current;
+            qrRef.current = null;
+            
+            scanner.stop()
+              .catch(() => {})
               .finally(() => {
-                qrRef.current = null;
+                // Clear viewfinder
+                try {
+                  scanner.clear();
+                } catch (e) {
+                  // Ignore clear errors
+                }
               });
           }
         };
@@ -1436,34 +1469,54 @@
         if (code && code.trim()) {
           doneRef.current = true;
           if (qrRef.current) {
-            qrRef.current.stop().catch(() => { });
+            qrRef.current.stop().catch(() => {});
           }
           onScan(code.trim());
         }
       };
 
+      // Render berbeda untuk setiap status
       return (
-        <div className="modal-overlay" onClick={onClose}>
-          <div className="modal" style={{ maxWidth: 500, padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => {
+          // Hanya bisa close jika belum scanning
+          if (status !== 'scanned') {
+            doneRef.current = true;
+            onClose();
+          }
+        }}>
+          <div className="modal" style={{ maxWidth: 500, padding: 0, overflow: 'hidden', borderRadius: '16px' }} onClick={e => e.stopPropagation()}>
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              padding: '14px 18px', 
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--card)'
+            }}>
               <span style={{ fontWeight: 700, fontSize: 15 }}>
-                {status === 'ready' ? '📷' : '📵'} {title}
+                {status === 'scanned' ? '✅' : status === 'ready' ? '📷' : '📵'} {title}
               </span>
-              <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}>
+              <button 
+                onClick={() => {
+                  doneRef.current = true;
+                  onClose();
+                }} 
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}
+              >
                 <Icon name="x" size={18} />
               </button>
             </div>
 
-            {status === 'error' ? (
-              /* Error State */
+            {/* Status: Error */}
+            {status === 'error' && (
               <div style={{ padding: 24, textAlign: 'center' }}>
-                <div style={{
-                  background: 'rgba(239,68,68,.1)',
-                  border: '1px solid rgba(239,68,68,.3)',
-                  borderRadius: 12,
-                  padding: 20,
-                  marginBottom: 16
+                <div style={{ 
+                  background: 'rgba(239,68,68,.1)', 
+                  border: '1px solid rgba(239,68,68,.3)', 
+                  borderRadius: 12, 
+                  padding: 20, 
+                  marginBottom: 16 
                 }}>
                   <div style={{ fontSize: 48, marginBottom: 12 }}>📵</div>
                   <div style={{ color: 'var(--danger)', fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
@@ -1473,73 +1526,120 @@
                     {errorMsg}
                   </div>
                 </div>
-
+                
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <button
-                    className="btn btn-primary"
+                  <button 
+                    className="btn btn-primary" 
                     style={{ width: '100%' }}
                     onClick={() => {
-                      // Tutup dan buka ulang untuk retry
                       onClose();
-                      // Trigger re-open from parent
                     }}
                   >
-                    🔄 Coba Lagi
+                    🔄 Coba Lagi (Tutup & Buka Ulang)
                   </button>
-                  <button
-                    className="btn btn-ghost"
+                  <button 
+                    className="btn btn-ghost" 
                     style={{ width: '100%' }}
                     onClick={handleManualInput}
                   >
                     ✏️ Input Manual
                   </button>
-                  <button
-                    className="btn btn-ghost"
+                  <button 
+                    className="btn btn-ghost" 
                     style={{ width: '100%', color: 'var(--dim)' }}
-                    onClick={onClose}
+                    onClick={() => {
+                      doneRef.current = true;
+                      onClose();
+                    }}
                   >
                     Tutup
                   </button>
                 </div>
               </div>
-            ) : (
-              /* Scanner View */
+            )}
+
+            {/* Status: Berhasil Scan */}
+            {status === 'scanned' && (
+              <div style={{ padding: 32, textAlign: 'center' }}>
+                <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--success)', marginBottom: 8 }}>
+                  Barcode Terdeteksi!
+                </div>
+                <div className="mono" style={{ 
+                  fontSize: 18, 
+                  fontWeight: 700, 
+                  color: 'var(--primary)',
+                  padding: '12px',
+                  background: 'var(--card2)',
+                  borderRadius: '8px',
+                  marginBottom: 16
+                }}>
+                  {scanResult}
+                </div>
+                <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+                  Menutup scanner...
+                </p>
+              </div>
+            )}
+
+            {/* Status: Init / Ready */}
+            {(status === 'init' || status === 'ready') && (
               <>
-                <div
-                  ref={divRef}
-                  className="scanner-container"
-                  style={{
-                    width: '100%',
+                <div 
+                  ref={divRef} 
+                  style={{ 
+                    width: '100%', 
                     background: '#000',
                     minHeight: 350,
                     position: 'relative'
-                  }}
+                  }} 
                 />
-
+                
+                {/* Loading overlay */}
+                {status === 'init' && (
+                  <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.7)'
+                  }}>
+                    <div style={{ textAlign: 'center', color: 'white' }}>
+                      <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
+                      <div style={{ fontSize: 14 }}>Memulai kamera...</div>
+                    </div>
+                  </div>
+                )}
+                
                 {/* Controls */}
-                <div style={{
-                  padding: '12px 18px',
-                  borderTop: '1px solid var(--border)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
+                <div style={{ 
+                  padding: '12px 18px', 
+                  borderTop: '1px solid var(--border)', 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
                   alignItems: 'center',
-                  gap: 8
+                  gap: 8,
+                  background: 'var(--card)'
                 }}>
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {status === 'init' ? '⏳ Memulai kamera...' : '🔍 Arahkan kamera ke barcode'}
+                    {status === 'init' ? '⏳ Memulai kamera...' : '🔍 Arahkan ke barcode'}
                   </span>
-
+                  
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <button
+                    <button 
                       className="btn btn-ghost btn-sm"
                       onClick={handleManualInput}
                       title="Input manual"
                     >
                       ✏️ Manual
                     </button>
-                    <button
+                    <button 
                       className="btn btn-ghost btn-sm"
-                      onClick={onClose}
+                      onClick={() => {
+                        doneRef.current = true;
+                        onClose();
+                      }}
                     >
                       Tutup
                     </button>
