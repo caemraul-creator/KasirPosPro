@@ -1305,7 +1305,7 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // BARCODE SCANNER MODAL — MOBILE FIXED v2
+    // BARCODE SCANNER MODAL — MOBILE FIXED v3
     // ═══════════════════════════════════════════════════
     function BarcodeScannerModal({ onScan, onClose, title = 'Scan Barcode' }) {
       const divRef = useRef(null);
@@ -1313,7 +1313,19 @@
       const doneRef = useRef(false);
       const [status, setStatus] = useState('init');
       const [errorMsg, setErrorMsg] = useState('');
-      const [scanResult, setScanResult] = useState(null); // Tampilkan hasil scan
+      const [scanResult, setScanResult] = useState(null);
+
+      const safeStopScanner = async () => {
+        if (!qrRef.current) return;
+        try {
+          const scanner = qrRef.current;
+          qrRef.current = null; // Prevent multiple stop calls
+          await scanner.stop();
+          scanner.clear();
+        } catch (e) {
+          console.debug('Safe stop error:', e);
+        }
+      };
 
       useEffect(() => {
         doneRef.current = false;
@@ -1332,62 +1344,47 @@
             }
             
             divRef.current.id = divId;
-            
-            // PENTING: Gunakan verbose: false (boolean, bukan object)
             const qr = new Html5Qrcode(divId, { verbose: false });
             qrRef.current = qr;
 
             const onScanSuccess = async (decodedText) => {
-              // Cegah multiple scan
               if (doneRef.current) return;
               doneRef.current = true;
               
               console.log('✅ Barcode terdeteksi:', decodedText);
               
-              // Tampilkan hasil scan dulu
+              // 1. Set status tapi JANGAN hapus divRef dari DOM dulu (gunakan CSS untuk menyembunyikan)
               if (mounted) {
                 setScanResult(decodedText);
                 setStatus('scanned');
               }
               
-              // HENTIKAN scanner dengan benar
-              try {
-                if (qrRef.current) {
-                  await qrRef.current.stop();
-                  // Tunggu sebentar agar kamera benar-benar mati
-                  await new Promise(resolve => setTimeout(resolve, 300));
-                }
-              } catch (stopErr) {
-                console.debug('Stop scanner error:', stopErr);
-              }
+              // 2. Stop kamera SEBELUM unmount
+              await safeStopScanner();
               
-              // Panggil callback setelah scanner benar-benar berhenti
-              if (mounted && doneRef.current) {
-                onScan(decodedText);
+              // 3. Panggil callback yang akan unmount modal ini
+              if (mounted) {
+                setTimeout(() => onScan(decodedText), 500); // beri delay sedikit agar user lihat centang hijau
               }
             };
 
             const onScanError = (errorMessage) => {
-              // Abaikan error "NotFound" yang normal terjadi
               if (!errorMessage || errorMessage.includes('NotFound')) return;
               console.debug('Scan debug:', errorMessage);
             };
 
-            // Konfigurasi untuk mobile
             const config = {
               fps: 10,
               qrbox: (viewfinderWidth, viewfinderHeight) => {
-                // Responsive qrbox untuk mobile
                 const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.6;
                 return { width: size, height: size * 0.6 };
               },
-              aspectRatio: 1.333, // 4:3 ratio lebih baik untuk mobile
+              aspectRatio: 1.333,
               disableFlip: false,
               videoConstraints: {
                 facingMode: { ideal: 'environment' },
                 width: { min: 640, ideal: 1280 },
                 height: { min: 480, ideal: 720 },
-                // Advanced constraints untuk fokus lebih baik
                 advanced: [
                   { focusMode: 'continuous' },
                   { exposureMode: 'continuous' }
@@ -1395,20 +1392,15 @@
               }
             };
 
-            // Tambah format support
             if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
               config.formatsToSupport = [
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.EAN_8,
-                Html5QrcodeSupportedFormats.CODE_128,
-                Html5QrcodeSupportedFormats.CODE_39,
-                Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
                 Html5QrcodeSupportedFormats.QR_CODE
               ];
             }
 
-            // Start kamera
             await qr.start(
               { facingMode: { ideal: 'environment' } },
               config,
@@ -1422,8 +1414,6 @@
             console.error('Scanner error:', error);
             if (mounted) {
               setStatus('error');
-              
-              // Deteksi error untuk mobile
               if (error.message?.includes('NotAllowedError')) {
                 setErrorMsg('Izin kamera ditolak. Buka Settings > Privacy > Camera.');
               } else if (error.message?.includes('NotFoundError')) {
@@ -1439,214 +1429,88 @@
 
         const timer = setTimeout(initScanner, 200);
 
-        // Cleanup yang lebih agresif
         return () => {
           mounted = false;
           clearTimeout(timer);
           doneRef.current = true;
-          
-          // Pastikan scanner benar-benar berhenti
-          if (qrRef.current) {
-            const scanner = qrRef.current;
-            qrRef.current = null;
-            
-            scanner.stop()
-              .catch(() => {})
-              .finally(() => {
-                // Clear viewfinder
-                try {
-                  scanner.clear();
-                } catch (e) {
-                  // Ignore clear errors
-                }
-              });
-          }
+          safeStopScanner();
         };
       }, []);
 
-      const handleManualInput = () => {
+      const handleManualInput = async () => {
         const code = prompt('Masukkan kode barcode secara manual:');
         if (code && code.trim()) {
           doneRef.current = true;
-          if (qrRef.current) {
-            qrRef.current.stop().catch(() => {});
-          }
+          await safeStopScanner();
           onScan(code.trim());
         }
       };
 
-      // Render berbeda untuk setiap status
+      const handleClose = async () => {
+        if (doneRef.current) return;
+        doneRef.current = true;
+        await safeStopScanner();
+        onClose();
+      };
+
       return (
-        <div className="modal-overlay" onClick={() => {
-          // Hanya bisa close jika belum scanning
-          if (status !== 'scanned') {
-            doneRef.current = true;
-            onClose();
-          }
-        }}>
-          <div className="modal" style={{ maxWidth: 500, padding: 0, overflow: 'hidden', borderRadius: '16px' }} onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center', 
-              padding: '14px 18px', 
-              borderBottom: '1px solid var(--border)',
-              background: 'var(--card)'
-            }}>
+        <div className="modal-overlay" onClick={() => status !== 'scanned' && handleClose()}>
+          <div className="modal" style={{ maxWidth: 500, padding: 0, overflow: 'hidden', borderRadius: '16px', position: 'relative' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)', background: 'var(--card)', position: 'relative', zIndex: 11 }}>
               <span style={{ fontWeight: 700, fontSize: 15 }}>
                 {status === 'scanned' ? '✅' : status === 'ready' ? '📷' : '📵'} {title}
               </span>
-              <button 
-                onClick={() => {
-                  doneRef.current = true;
-                  onClose();
-                }} 
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}
-              >
+              <button onClick={handleClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}>
                 <Icon name="x" size={18} />
               </button>
             </div>
 
-            {/* Status: Error */}
             {status === 'error' && (
               <div style={{ padding: 24, textAlign: 'center' }}>
-                <div style={{ 
-                  background: 'rgba(239,68,68,.1)', 
-                  border: '1px solid rgba(239,68,68,.3)', 
-                  borderRadius: 12, 
-                  padding: 20, 
-                  marginBottom: 16 
-                }}>
+                <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 12, padding: 20, marginBottom: 16 }}>
                   <div style={{ fontSize: 48, marginBottom: 12 }}>📵</div>
-                  <div style={{ color: 'var(--danger)', fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-                    Gagal Mengakses Kamera
-                  </div>
-                  <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.5 }}>
-                    {errorMsg}
-                  </div>
+                  <div style={{ color: 'var(--danger)', fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Gagal Mengakses Kamera</div>
+                  <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.5 }}>{errorMsg}</div>
                 </div>
-                
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <button 
-                    className="btn btn-primary" 
-                    style={{ width: '100%' }}
-                    onClick={() => {
-                      onClose();
-                    }}
-                  >
-                    🔄 Coba Lagi (Tutup & Buka Ulang)
-                  </button>
-                  <button 
-                    className="btn btn-ghost" 
-                    style={{ width: '100%' }}
-                    onClick={handleManualInput}
-                  >
-                    ✏️ Input Manual
-                  </button>
-                  <button 
-                    className="btn btn-ghost" 
-                    style={{ width: '100%', color: 'var(--dim)' }}
-                    onClick={() => {
-                      doneRef.current = true;
-                      onClose();
-                    }}
-                  >
-                    Tutup
-                  </button>
+                  <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleClose}>🔄 Coba Lagi (Tutup & Buka Ulang)</button>
+                  <button className="btn btn-ghost" style={{ width: '100%' }} onClick={handleManualInput}>✏️ Input Manual</button>
+                  <button className="btn btn-ghost" style={{ width: '100%', color: 'var(--dim)' }} onClick={handleClose}>Tutup</button>
                 </div>
               </div>
             )}
 
-            {/* Status: Berhasil Scan */}
-            {status === 'scanned' && (
-              <div style={{ padding: 32, textAlign: 'center' }}>
-                <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--success)', marginBottom: 8 }}>
-                  Barcode Terdeteksi!
+            <div style={{ display: status === 'error' ? 'none' : 'block' }}>
+              {status === 'scanned' && (
+                <div style={{ padding: 32, textAlign: 'center', position: 'absolute', top: 50, left: 0, right: 0, bottom: 0, background: 'var(--surface)', zIndex: 10, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--success)', marginBottom: 8 }}>Barcode Terdeteksi!</div>
+                  <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: 'var(--primary)', padding: '12px', background: 'var(--card2)', borderRadius: '8px', marginBottom: 16 }}>{scanResult}</div>
+                  <p style={{ color: 'var(--muted)', fontSize: 12 }}>Menutup scanner...</p>
                 </div>
-                <div className="mono" style={{ 
-                  fontSize: 18, 
-                  fontWeight: 700, 
-                  color: 'var(--primary)',
-                  padding: '12px',
-                  background: 'var(--card2)',
-                  borderRadius: '8px',
-                  marginBottom: 16
-                }}>
-                  {scanResult}
-                </div>
-                <p style={{ color: 'var(--muted)', fontSize: 12 }}>
-                  Menutup scanner...
-                </p>
-              </div>
-            )}
+              )}
 
-            {/* Status: Init / Ready */}
-            {(status === 'init' || status === 'ready') && (
-              <>
-                <div 
-                  ref={divRef} 
-                  style={{ 
-                    width: '100%', 
-                    background: '#000',
-                    minHeight: 350,
-                    position: 'relative'
-                  }} 
-                />
-                
-                {/* Loading overlay */}
-                {status === 'init' && (
-                  <div style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'rgba(0,0,0,0.7)'
-                  }}>
-                    <div style={{ textAlign: 'center', color: 'white' }}>
-                      <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
-                      <div style={{ fontSize: 14 }}>Memulai kamera...</div>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Controls */}
-                <div style={{ 
-                  padding: '12px 18px', 
-                  borderTop: '1px solid var(--border)', 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  gap: 8,
-                  background: 'var(--card)'
-                }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {status === 'init' ? '⏳ Memulai kamera...' : '🔍 Arahkan ke barcode'}
-                  </span>
-                  
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button 
-                      className="btn btn-ghost btn-sm"
-                      onClick={handleManualInput}
-                      title="Input manual"
-                    >
-                      ✏️ Manual
-                    </button>
-                    <button 
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        doneRef.current = true;
-                        onClose();
-                      }}
-                    >
-                      Tutup
-                    </button>
+              <div ref={divRef} style={{ width: '100%', background: '#000', minHeight: 350, position: 'relative' }} />
+              
+              {status === 'init' && (
+                <div style={{ position: 'absolute', inset: 0, top: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', zIndex: 5 }}>
+                  <div style={{ textAlign: 'center', color: 'white' }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
+                    <div style={{ fontSize: 14 }}>Memulai kamera...</div>
                   </div>
                 </div>
-              </>
-            )}
+              )}
+              
+              <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: 'var(--card)', position: 'relative', zIndex: 11 }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {status === 'init' ? '⏳ Memulai kamera...' : '🔍 Arahkan ke barcode'}
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={handleManualInput} title="Input manual">✏️ Manual</button>
+                  <button className="btn btn-ghost btn-sm" onClick={handleClose}>Tutup</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       );
