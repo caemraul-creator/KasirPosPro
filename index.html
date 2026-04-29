@@ -1370,12 +1370,23 @@
           const hasFormatSupport = typeof Html5QrcodeSupportedFormats !== 'undefined';
 
           const scanConfig = {
-            fps: 10,
-            qrbox: (w, h) => ({ width: Math.min(w * 0.8, 300), height: Math.min(h * 0.4, 120) }),
+            fps: 15,
+            // Kotak scan lebih kecil = kamera lebih mudah fokus tepat di barcode
+            qrbox: (w, h) => ({
+              width: Math.min(w * 0.7, 280),
+              height: Math.min(h * 0.3, 100),
+            }),
+            aspectRatio: 1.7777778, // paksa 16:9 agar tidak stretch
             videoConstraints: {
-              facingMode: { ideal: 'environment' },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
+              facingMode: { exact: 'environment' }, // paksa kamera belakang
+              width:  { min: 640, ideal: 1920, max: 3840 },
+              height: { min: 480, ideal: 1080, max: 2160 },
+              // PENYEBAB BURAM: tanpa advanced focusMode, kamera mengunci fokus
+              // pada frame lebar, bukan pada barcode di kotak scan
+              advanced: [
+                { focusMode: 'continuous' },
+                { focusMode: 'auto' },
+              ],
             },
           };
 
@@ -1395,20 +1406,24 @@
           // Gunakan facingMode object sebagai parameter pertama (bukan string kosong).
           // String kosong "" dianggap device ID tidak valid oleh html5-qrcode → scanner gagal.
           // videoConstraints di scanConfig tetap dipertahankan sebagai fallback.
-          qr.start(
-            { facingMode: { ideal: 'environment' } },
-            scanConfig,
-            (code) => {
-              if (doneRef.current) return;
-              doneRef.current = true;
-              qr.stop().catch(() => { }).finally(() => onScan(code));
-            },
-            () => { }
-          )
+          const onDecode = (code) => {
+            if (doneRef.current) return;
+            doneRef.current = true;
+            qr.stop().catch(() => {}).finally(() => onScan(code));
+          };
+
+          // Coba kamera belakang dulu (exact), fallback ke ideal jika tidak tersedia
+          qr.start({ facingMode: { exact: 'environment' } }, scanConfig, onDecode, () => {})
             .then(() => setStatus('ready'))
-            .catch((err) => {
-              console.error('Barcode scanner error:', err);
-              setStatus('error');
+            .catch(() => {
+              // Fallback: kamera manapun tersedia (misal desktop)
+              const fallbackConfig = { ...scanConfig, videoConstraints: { facingMode: { ideal: 'environment' } } };
+              qr.start({ facingMode: { ideal: 'environment' } }, fallbackConfig, onDecode, () => {})
+                .then(() => setStatus('ready'))
+                .catch((err) => {
+                  console.error('Barcode scanner error:', err);
+                  setStatus('error');
+                });
             });
         }, 50);
 
