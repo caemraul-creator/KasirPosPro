@@ -1392,10 +1392,11 @@
             ];
           }
 
-          // BUG FIX #2: Gunakan string kosong sebagai cameraId default,
-          // biarkan videoConstraints yang mengatur kamera
+          // Gunakan facingMode object sebagai parameter pertama (bukan string kosong).
+          // String kosong "" dianggap device ID tidak valid oleh html5-qrcode → scanner gagal.
+          // videoConstraints di scanConfig tetap dipertahankan sebagai fallback.
           qr.start(
-            "",
+            { facingMode: { ideal: 'environment' } },
             scanConfig,
             (code) => {
               if (doneRef.current) return;
@@ -1464,7 +1465,7 @@
     // POS TERMINAL (with stock validation)
     // ═══════════════════════════════════════════════════
     function POSTerminal() {
-      const { products, setProducts, addTransaction, members, debts, user, addDebt, addToast } = useApp();
+      const { products, setProducts, addTransaction, members, setMembers, debts, user, addDebt, addToast } = useApp();
       const [cart, setCart] = useState([]);
       const [search, setSearch] = useState('');
       const [selMember, setSelMember] = useState(null);
@@ -2312,7 +2313,7 @@
     // MEMBER MANAGEMENT
     // ═══════════════════════════════════════════════════
     function MemberView() {
-      const { members, setMembers, transactions, addToast } = useApp();
+      const { members, setMembers, transactions, debts, addToast } = useApp();
       const [search, setSearch] = useState('');
       const [showForm, setShowForm] = useState(false);
       const [editItem, setEditItem] = useState(null);
