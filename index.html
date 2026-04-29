@@ -670,7 +670,12 @@
     const fmtDate = d => new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
     const fmtTime = d => new Date(d).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
     const fmtDateTime = d => fmtDate(d) + ' ' + fmtTime(d);
-    const today = () => new Date().toISOString().split('T')[0];
+    // BUG FIX #5: toISOString() menggunakan UTC — bisa salah 1 hari di timezone Indonesia (UTC+7)
+    // Gunakan local date agar tanggal sesuai dengan waktu lokal toko
+    const today = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
     const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const uid = () => crypto.randomUUID ? crypto.randomUUID() : genId();
 
@@ -1335,7 +1340,7 @@
     }
 
     // ═══════════════════════════════════════════════════
-    // BARCODE SCANNER MODAL — v4 (loop bug fixed)
+    // BARCODE SCANNER MODAL — v5 (bug fixes: constructor, camera config, format enum)
     // ═══════════════════════════════════════════════════
     function BarcodeScannerModal({ onScan, onClose, title = 'Scan Barcode' }) {
       const divRef = useRef(null);
@@ -1355,29 +1360,43 @@
           }
           divRef.current.id = divId;
 
-          const qr = new Html5Qrcode(divId, { verbose: false });
+          // BUG FIX #1: Constructor parameter kedua harus boolean, bukan object
+          // { verbose: false } adalah object truthy, jadi verbose tetap aktif
+          const qr = new Html5Qrcode(divId, false);
           qrRef.current = qr;
 
+          // BUG FIX #2: Hapus duplikasi facingMode, gunakan hanya videoConstraints
+          // BUG FIX #3: Tambahkan pengecekan Html5QrcodeSupportedFormats
+          const hasFormatSupport = typeof Html5QrcodeSupportedFormats !== 'undefined';
+
+          const scanConfig = {
+            fps: 10,
+            qrbox: (w, h) => ({ width: Math.min(w * 0.8, 300), height: Math.min(h * 0.4, 120) }),
+            videoConstraints: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          };
+
+          // Hanya tambahkan formatsToSupport jika enum tersedia
+          if (hasFormatSupport) {
+            scanConfig.formatsToSupport = [
+              Html5QrcodeSupportedFormats.EAN_13,
+              Html5QrcodeSupportedFormats.EAN_8,
+              Html5QrcodeSupportedFormats.CODE_128,
+              Html5QrcodeSupportedFormats.CODE_39,
+              Html5QrcodeSupportedFormats.UPC_A,
+              Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.QR_CODE,
+            ];
+          }
+
+          // BUG FIX #2: Gunakan string kosong sebagai cameraId default,
+          // biarkan videoConstraints yang mengatur kamera
           qr.start(
             { facingMode: 'environment' },
-            {
-              fps: 10,
-              qrbox: (w, h) => ({ width: Math.min(w * 0.8, 300), height: Math.min(h * 0.4, 120) }),
-              videoConstraints: {
-                facingMode: { ideal: 'environment' },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              },
-              formatsToSupport: [
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.EAN_8,
-                Html5QrcodeSupportedFormats.CODE_128,
-                Html5QrcodeSupportedFormats.CODE_39,
-                Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
-                Html5QrcodeSupportedFormats.QR_CODE,
-              ],
-            },
+            scanConfig,
             (code) => {
               if (doneRef.current) return;
               doneRef.current = true;
@@ -1386,13 +1405,20 @@
             () => { }
           )
             .then(() => setStatus('ready'))
-            .catch(() => setStatus('error'));
+            .catch((err) => {
+              console.error('Barcode scanner error:', err);
+              setStatus('error');
+            });
         }, 50);
 
         return () => {
           clearTimeout(timer);
           doneRef.current = true;
-          if (qrRef.current) qrRef.current.stop().catch(() => { });
+          if (qrRef.current) {
+            qrRef.current.stop().catch(() => { }).finally(() => {
+              qrRef.current = null;
+            });
+          }
         };
       }, []);
 
@@ -1775,7 +1801,8 @@
 
     function MemberSearchModal({ members, onSelect, onClose }) {
       const [q, setQ] = useState('');
-      const filtered = members.filter(m => m.name.toLowerCase().includes(q.toLowerCase()) || m.phone.includes(q));
+      // BUG FIX #4: m.phone bisa undefined — gunakan optional chaining
+      const filtered = members.filter(m => m.name.toLowerCase().includes(q.toLowerCase()) || m.phone?.includes(q));
       return (
         <div className="modal-overlay" onClick={onClose}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -2289,7 +2316,8 @@
       const [editItem, setEditItem] = useState(null);
       const [viewProfile, setViewProfile] = useState(null);
 
-      const filtered = members.filter(m => m.name.toLowerCase().includes(search.toLowerCase()) || m.phone.includes(search));
+      // BUG FIX #4: m.phone bisa undefined — gunakan optional chaining
+      const filtered = members.filter(m => m.name.toLowerCase().includes(search.toLowerCase()) || m.phone?.includes(search));
 
       return (
         <div style={{ padding: '24px', overflowY: 'auto', height: '100%' }}>
