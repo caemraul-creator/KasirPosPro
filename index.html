@@ -1332,7 +1332,7 @@
         setScanResult(null);
         let divId = 'kp-qr-' + Date.now();
         let mounted = true;
-        
+
         const initScanner = async () => {
           try {
             if (!divRef.current || !window.Html5Qrcode) {
@@ -1342,7 +1342,7 @@
               }
               return;
             }
-            
+
             divRef.current.id = divId;
             const qr = new Html5Qrcode(divId, { verbose: false });
             qrRef.current = qr;
@@ -1350,18 +1350,18 @@
             const onScanSuccess = async (decodedText) => {
               if (doneRef.current) return;
               doneRef.current = true;
-              
+
               console.log('✅ Barcode terdeteksi:', decodedText);
-              
+
               // 1. Set status tapi JANGAN hapus divRef dari DOM dulu (gunakan CSS untuk menyembunyikan)
               if (mounted) {
                 setScanResult(decodedText);
                 setStatus('scanned');
               }
-              
+
               // 2. Stop kamera SEBELUM unmount
               await safeStopScanner();
-              
+
               // 3. Panggil callback yang akan unmount modal ini
               if (mounted) {
                 setTimeout(() => onScan(decodedText), 500); // beri delay sedikit agar user lihat centang hijau
@@ -1407,9 +1407,9 @@
               onScanSuccess,
               onScanError
             );
-            
+
             if (mounted) setStatus('ready');
-            
+
           } catch (error) {
             console.error('Scanner error:', error);
             if (mounted) {
@@ -1491,7 +1491,7 @@
               )}
 
               <div ref={divRef} style={{ width: '100%', background: '#000', minHeight: 350, position: 'relative' }} />
-              
+
               {status === 'init' && (
                 <div style={{ position: 'absolute', inset: 0, top: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', zIndex: 5 }}>
                   <div style={{ textAlign: 'center', color: 'white' }}>
@@ -1500,7 +1500,7 @@
                   </div>
                 </div>
               )}
-              
+
               <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: 'var(--card)', position: 'relative', zIndex: 11 }}>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                   {status === 'init' ? '⏳ Memulai kamera...' : '🔍 Arahkan ke barcode'}
@@ -2136,6 +2136,7 @@
       const [editItem, setEditItem] = useState(null);
       const [catFilter, setCatFilter] = useState('Semua');
       const [showStockIn, setShowStockIn] = useState(null);
+      const [showAddFlow, setShowAddFlow] = useState(false);
 
       const cats = ['Semua', ...CATEGORIES];
       const filtered = products.filter(p => {
@@ -2162,7 +2163,7 @@
               <button className="btn btn-ghost" onClick={() => exportToExcel(products, 'Produk')}>
                 <Icon name="download" size={14} /> Export Excel
               </button>
-              <button className="btn btn-primary" onClick={() => { setEditItem(null); setShowForm(true); }}>
+              <button className="btn btn-primary" onClick={() => { setEditItem(null); setShowAddFlow(true); }}>
                 <Icon name="plus" size={14} /> Tambah Produk
               </button>
             </div>
@@ -2220,6 +2221,7 @@
                     <tr key={p.id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 ? 'var(--card2)' : 'transparent' }}>
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
+                        {p.batchLabel && <span className="badge badge-info" style={{ fontSize: 10, marginTop: 3 }}>{p.batchLabel}</span>}
                       </td>
                       <td style={{ padding: '12px 16px' }}><span className="mono tag">{p.barcode || '-'}</span></td>
                       <td style={{ padding: '12px 16px' }}><span className="badge badge-info">{p.category}</span></td>
@@ -2273,6 +2275,19 @@
                 }
                 setShowForm(false);
                 addToast(editItem ? 'Produk diperbarui' : 'Produk ditambahkan', 'var(--success)', '✅');
+              }}
+            />
+          )}
+
+          {showAddFlow && (
+            <AddProductFlow
+              onClose={() => setShowAddFlow(false)}
+              onSave={(data) => {
+                const newProduct = { ...data, id: uid() };
+                setProducts(prev => [...prev, newProduct]);
+                syncToGoogleSheets('ADD_PRODUCT', newProduct);
+                setShowAddFlow(false);
+                addToast('Produk ditambahkan', 'var(--success)', '✅');
               }}
             />
           )}
@@ -2367,7 +2382,7 @@
       );
     }
 
-    function ProductForm({ item, onClose, onSave, onEditExisting, focusExpiry = false }) {
+    function ProductForm({ item, onClose, onSave, onEditExisting, focusExpiry = false, initialBarcode = '' }) {
       const { products } = useApp();
       const isoToDisplay = (iso) => {
         if (!iso || iso.length < 10) return iso || '';
@@ -2380,7 +2395,7 @@
         return disp;
       };
       const initItem = item ? { ...item, expiryDate: isoToDisplay(item.expiryDate) } : {};
-      const [form, setForm] = useState({ name: '', barcode: '', price: '', cost: '', stock: '', minStock: '10', category: 'Makanan', expiryDate: '', ...initItem });
+      const [form, setForm] = useState({ name: '', barcode: initialBarcode || '', price: '', cost: '', stock: '', minStock: '10', category: 'Makanan', expiryDate: '', ...initItem });
       const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
       const [dupResolved, setDupResolved] = useState(false);
       const expiryRef = useRef(null);
@@ -2513,6 +2528,334 @@
                 >
                   <Icon name="check" size={14} /> Simpan
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    // ADD PRODUCT FLOW — SCAN → BATCH OR NEW
+    // ═══════════════════════════════════════════════════
+    function AddProductFlow({ onClose, onSave }) {
+      const { products } = useApp();
+      const [step, setStep] = useState('scan'); // 'scan' | 'found' | 'new'
+      const [scannedBarcode, setScannedBarcode] = useState('');
+      const [manualBarcode, setManualBarcode] = useState('');
+      const [matchedProducts, setMatchedProducts] = useState([]);
+
+      const handleScan = (code) => {
+        const trimmed = code.trim();
+        setScannedBarcode(trimmed);
+        const existing = products.filter(p => p.barcode === trimmed);
+        setMatchedProducts(existing);
+        if (existing.length > 0) {
+          setStep('found');
+        } else {
+          setStep('new');
+        }
+      };
+
+      const handleManual = () => {
+        const code = manualBarcode.trim();
+        if (!code) return;
+        handleScan(code);
+      };
+
+      if (step === 'found') {
+        return (
+          <BatchAddModal
+            barcode={scannedBarcode}
+            matchedProducts={matchedProducts}
+            onClose={onClose}
+            onSave={onSave}
+            onNewProduct={() => setStep('new')}
+          />
+        );
+      }
+
+      if (step === 'new') {
+        return (
+          <ProductForm
+            initialBarcode={scannedBarcode}
+            onClose={onClose}
+            onSave={onSave}
+          />
+        );
+      }
+
+      // step === 'scan'
+      return (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 500, padding: 0, overflow: 'hidden', borderRadius: '16px', position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)', background: 'var(--card)', position: 'relative', zIndex: 11 }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>📷 Scan Barcode Produk</span>
+              <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}>
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+            <ScannerWithManual
+              onScan={handleScan}
+              onClose={onClose}
+              manualBarcode={manualBarcode}
+              setManualBarcode={setManualBarcode}
+              handleManual={handleManual}
+              onSkip={() => setStep('new')}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    function ScannerWithManual({ onScan, onClose, manualBarcode, setManualBarcode, handleManual, onSkip }) {
+      const divRef = useRef(null);
+      const qrRef = useRef(null);
+      const doneRef = useRef(false);
+      const [status, setStatus] = useState('init');
+      const [errorMsg, setErrorMsg] = useState('');
+      const [scanResult, setScanResult] = useState(null);
+
+      const safeStop = async () => {
+        if (!qrRef.current) return;
+        try {
+          const s = qrRef.current;
+          qrRef.current = null;
+          await s.stop();
+          s.clear();
+        } catch (e) { console.debug('stop err:', e); }
+      };
+
+      useEffect(() => {
+        doneRef.current = false;
+        let divId = 'kp-flow-qr-' + Date.now();
+        let mounted = true;
+        const init = async () => {
+          try {
+            if (!divRef.current || !window.Html5Qrcode) { if (mounted) { setStatus('error'); setErrorMsg('Library QR tidak tersedia.'); } return; }
+            divRef.current.id = divId;
+            const qr = new Html5Qrcode(divId, { verbose: false });
+            qrRef.current = qr;
+            const onSuccess = async (code) => {
+              if (doneRef.current) return;
+              doneRef.current = true;
+              if (mounted) { setScanResult(code); setStatus('scanned'); }
+              await safeStop();
+              if (mounted) setTimeout(() => onScan(code), 500);
+            };
+            const config = {
+              fps: 10,
+              qrbox: (w, h) => { const s = Math.min(w, h) * 0.6; return { width: s, height: s * 0.6 }; },
+              aspectRatio: 1.333,
+              disableFlip: false,
+              videoConstraints: { facingMode: { ideal: 'environment' }, width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 720 } }
+            };
+            if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
+              config.formatsToSupport = [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E, Html5QrcodeSupportedFormats.QR_CODE];
+            }
+            await qr.start({ facingMode: { ideal: 'environment' } }, config, onSuccess, () => { });
+            if (mounted) setStatus('ready');
+          } catch (err) {
+            if (mounted) { setStatus('error'); setErrorMsg(err.message?.includes('NotAllowedError') ? 'Izin kamera ditolak.' : err.message?.includes('NotFoundError') ? 'Kamera tidak ditemukan.' : err.message || 'Gagal mengakses kamera'); }
+          }
+        };
+        const t = setTimeout(init, 200);
+        return () => { mounted = false; clearTimeout(t); doneRef.current = true; safeStop(); };
+      }, []);
+
+      const handleClose = async () => {
+        if (!doneRef.current) { doneRef.current = true; await safeStop(); }
+        onClose();
+      };
+
+      return (
+        <div>
+          {status === 'error' ? (
+            <div style={{ padding: 24, textAlign: 'center' }}>
+              <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 12, padding: 20, marginBottom: 16 }}>
+                <div style={{ fontSize: 40, marginBottom: 8 }}>📵</div>
+                <div style={{ color: 'var(--danger)', fontWeight: 700, marginBottom: 6 }}>Kamera tidak bisa diakses</div>
+                <div style={{ color: 'var(--muted)', fontSize: 12 }}>{errorMsg}</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="input mono" placeholder="Ketik barcode manual..." value={manualBarcode} onChange={e => setManualBarcode(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleManual()} autoFocus />
+                  <button className="btn btn-primary" onClick={handleManual}>Cari</button>
+                </div>
+                <button className="btn btn-ghost" style={{ width: '100%' }} onClick={onSkip}>+ Tambah Tanpa Barcode</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              {status === 'scanned' && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--surface)', zIndex: 10, minHeight: 300 }}>
+                  <div style={{ fontSize: 56, marginBottom: 12 }}>✅</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--success)', marginBottom: 8 }}>Barcode Terdeteksi!</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--primary)', padding: '10px 16px', background: 'var(--card2)', borderRadius: 8, marginBottom: 10 }}>{scanResult}</div>
+                  <p style={{ color: 'var(--muted)', fontSize: 12 }}>Mengecek database...</p>
+                </div>
+              )}
+              {status === 'init' && (
+                <div style={{ position: 'absolute', inset: 0, top: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.7)', zIndex: 5, minHeight: 300 }}>
+                  <div style={{ textAlign: 'center', color: 'white' }}><div style={{ fontSize: 32, marginBottom: 8 }}>📷</div><div>Memulai kamera...</div></div>
+                </div>
+              )}
+              <div ref={divRef} style={{ width: '100%', background: '#000', minHeight: 300 }} />
+              <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', background: 'var(--card)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>🔍 {status === 'init' ? 'Memulai...' : 'Arahkan kamera ke barcode'}</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={onSkip}>+ Tanpa Scan</button>
+                </div>
+              </div>
+              <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, textAlign: 'center' }}>— atau ketik barcode manual —</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="input mono" placeholder="Ketik barcode..." value={manualBarcode} onChange={e => setManualBarcode(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleManual()} />
+                  <button className="btn btn-primary" onClick={handleManual} disabled={!manualBarcode.trim()}>Cari</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function BatchAddModal({ barcode, matchedProducts, onClose, onSave, onNewProduct }) {
+      const baseProduct = matchedProducts[0];
+      const isoToDisplay = (iso) => {
+        if (!iso || iso.length < 10) return iso || '';
+        const [y, m, d] = iso.split('-');
+        return d + '/' + m + '/' + y;
+      };
+      const displayToIso = (disp) => {
+        const parts = disp.split('/');
+        if (parts.length === 3 && parts[2].length === 4) return parts[2] + '-' + parts[1] + '-' + parts[0];
+        return disp;
+      };
+
+      const [expiryDate, setExpiryDate] = useState('');
+      const [stock, setStock] = useState('');
+      const [error, setError] = useState('');
+      const expiryRef = useRef(null);
+
+      useEffect(() => { setTimeout(() => expiryRef.current?.focus(), 200); }, []);
+
+      const batchNum = matchedProducts.length + 1;
+      const batchLabel = `Batch ${batchNum}`;
+
+      const handleSave = () => {
+        if (!expiryDate || expiryDate.length < 10) { setError('Tanggal kadaluarsa wajib diisi (dd/mm/yyyy)'); return; }
+        const isoExp = displayToIso(expiryDate);
+        const sameExpiry = matchedProducts.find(p => p.expiryDate === isoExp);
+        if (sameExpiry) { setError(`Batch dengan kadaluarsa ${expiryDate} sudah ada: ${sameExpiry.batchLabel || sameExpiry.name}`); return; }
+        onSave({
+          ...baseProduct,
+          stock: +stock || 0,
+          expiryDate: isoExp,
+          batchLabel,
+        });
+      };
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+
+      return (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <div>
+                  <h3 style={{ fontWeight: 700 }}>📦 Produk Ditemukan!</h3>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Barcode cocok — tambah batch baru</div>
+                </div>
+                <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}>
+                  <Icon name="x" size={18} />
+                </button>
+              </div>
+
+              {/* Product info card */}
+              <div style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.25)', borderRadius: 10, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{baseProduct.name}</div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--muted)' }}>
+                  <span>Barcode: <strong className="mono" style={{ color: 'var(--text)' }}>{barcode}</strong></span>
+                  <span>Harga: <strong style={{ color: 'var(--primary)' }}>Rp {Number(baseProduct.price).toLocaleString('id-ID')}</strong></span>
+                  <span>Kategori: <strong style={{ color: 'var(--text)' }}>{baseProduct.category}</strong></span>
+                </div>
+              </div>
+
+              {/* Existing batches */}
+              <div style={{ marginBottom: 16 }}>
+                <div className="label">Batch Yang Sudah Ada</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {matchedProducts.map((p, i) => (
+                    <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--card2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}>
+                      <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{p.batchLabel || `Batch ${i + 1}`}</span>
+                      <span>
+                        Exp: <strong style={{ color: p.expiryDate && p.expiryDate < todayStr ? 'var(--danger)' : 'var(--text)' }}>
+                          {p.expiryDate ? isoToDisplay(p.expiryDate) : '—'}
+                        </strong>
+                      </span>
+                      <span style={{ color: p.stock <= 0 ? 'var(--danger)' : 'var(--success)', fontWeight: 700 }}>{p.stock} pcs</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* New batch form */}
+              <div style={{ background: 'var(--card2)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <span style={{ background: 'var(--primary)', color: '#000', borderRadius: '50%', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>{batchNum}</span>
+                  <span style={{ fontWeight: 700, fontSize: 13 }}>Tambah {batchLabel}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div style={{ gridColumn: '1/-1' }}>
+                    <div className="label">Tanggal Kadaluarsa*</div>
+                    <input
+                      ref={expiryRef}
+                      className="input mono"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="dd/mm/yyyy"
+                      maxLength={10}
+                      value={expiryDate}
+                      onChange={e => {
+                        setError('');
+                        let v = e.target.value.replace(/[^0-9]/g, '');
+                        if (v.length >= 3) v = v.slice(0, 2) + '/' + v.slice(2);
+                        if (v.length >= 6) v = v.slice(0, 5) + '/' + v.slice(5);
+                        setExpiryDate(v);
+                      }}
+                      style={{ borderColor: error ? 'var(--danger)' : undefined }}
+                    />
+                  </div>
+                  <div>
+                    <div className="label">Stok Awal</div>
+                    <input
+                      className="input mono"
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={stock}
+                      onChange={e => setStock(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <div className="label">Label Batch</div>
+                    <input className="input" type="text" value={batchLabel} disabled style={{ opacity: 0.5 }} />
+                  </div>
+                </div>
+                {error && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}>⚠️ {error}</div>}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <button className="btn btn-ghost btn-sm" onClick={onNewProduct} title="Produk dengan nama/harga berbeda meski barcode sama">
+                  🔀 Produk Berbeda
+                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-ghost" onClick={onClose}>Batal</button>
+                  <button className="btn btn-primary" onClick={handleSave}>
+                    <Icon name="check" size={14} /> Simpan {batchLabel}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
