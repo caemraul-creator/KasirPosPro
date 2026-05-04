@@ -2375,9 +2375,11 @@
               product={showStockIn}
               onClose={() => setShowStockIn(null)}
               onSave={(productId, qty, notes, batchNo, expiredDate) => {
+                const d = new Date();
+                const autoNo = `BTH-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
                 const newBatch = {
                   id: uid(),
-                  batchNo: batchNo || ('BTH-' + Date.now().toString(36).toUpperCase()),
+                  batchNo: batchNo || autoNo,
                   expiredDate: expiredDate || '',
                   qty,
                   receivedDate: today(),
@@ -2588,7 +2590,6 @@
     function StockInModal({ product, onClose, onSave }) {
       const [qty, setQty] = useState(1);
       const [notes, setNotes] = useState('');
-      const [batchNo, setBatchNo] = useState('');
       const [expiredDate, setExpiredDate] = useState('');
 
       const isoToDisplay = (iso) => {
@@ -2648,23 +2649,17 @@
 
               <div style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.2)', borderRadius: 8, padding: '14px', marginBottom: 14 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: 'var(--primary)' }}>➕ Tambah Batch Baru</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                  <div>
-                    <div className="label">No. Batch / Kode</div>
-                    <input className="input mono" type="text" placeholder="Misal: BTH-001" value={batchNo} onChange={e => setBatchNo(e.target.value)} />
-                  </div>
-                  <div>
-                    <div className="label">Tgl Kadaluarsa</div>
-                    <input className="input mono" type="text" inputMode="numeric" placeholder="dd/mm/yyyy" maxLength={10}
-                      value={expiredDate}
-                      onChange={e => {
-                        let v = e.target.value.replace(/[^0-9]/g, '');
-                        if (v.length >= 3) v = v.slice(0, 2) + '/' + v.slice(2);
-                        if (v.length >= 6) v = v.slice(0, 5) + '/' + v.slice(5);
-                        setExpiredDate(v);
-                      }}
-                    />
-                  </div>
+                <div style={{ marginBottom: 10 }}>
+                  <div className="label">Tgl Kadaluarsa</div>
+                  <input className="input mono" type="text" inputMode="numeric" placeholder="dd/mm/yyyy" maxLength={10}
+                    value={expiredDate}
+                    onChange={e => {
+                      let v = e.target.value.replace(/[^0-9]/g, '');
+                      if (v.length >= 3) v = v.slice(0, 2) + '/' + v.slice(2);
+                      if (v.length >= 6) v = v.slice(0, 5) + '/' + v.slice(5);
+                      setExpiredDate(v);
+                    }}
+                  />
                 </div>
                 <div style={{ marginBottom: 10 }}>
                   <div className="label">Jumlah Masuk</div>
@@ -2685,7 +2680,7 @@
                 <button className="btn btn-ghost" onClick={onClose}>Batal</button>
                 <button className="btn btn-primary" onClick={() => {
                   const expIso = expiredDate.length === 10 ? displayToIso(expiredDate) : '';
-                  onSave(product.id, qty, notes, batchNo.trim(), expIso);
+                  onSave(product.id, qty, notes, '', expIso);
                 }}>
                   <Icon name="check" size={14} /> Tambah {qty} Stok
                 </button>
