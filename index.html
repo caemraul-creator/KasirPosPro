@@ -662,6 +662,11 @@
     const fmt = n => 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
     const fmtNum = n => Math.round(n || 0).toLocaleString('id-ID');
     const fmtDate = d => new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+    const fmtDateSlash = d => {
+      if (!d || d.length < 10) return d || '-';
+      const [y, m, dy] = d.split('-');
+      return `${dy}/${m}/${y}`;
+    };
     const fmtTime = d => new Date(d).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
     const fmtDateTime = d => fmtDate(d) + ' ' + fmtTime(d);
 
@@ -1322,7 +1327,7 @@
                       <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: e.days <= 0 ? 'var(--danger)' : e.days <= 7 ? 'var(--warn)' : 'var(--primary)' }}>
                         {e.days <= 0 ? '🚨 Sudah expired!' : e.days <= 7 ? `⚠️ ${e.days} hari lagi` : `📅 ${e.days} hari lagi`}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>Sisa: {e.qty} pcs | {fmtDate(e.expiredDate)}</div>
+                      <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>Sisa: {e.qty} pcs | {fmtDateSlash(e.expiredDate)}</div>
                     </div>
                   ))}
                 </div>
@@ -2255,7 +2260,15 @@
               { l: 'Total Produk', v: products.length, c: 'var(--info)' },
               { l: 'Stok Menipis', v: products.filter(p => p.stock <= p.minStock).length, c: 'var(--warn)' },
               { l: 'Stok Habis', v: products.filter(p => p.stock === 0).length, c: 'var(--danger)' },
-              { l: 'Kadaluarsa', v: products.filter(p => p.expiryDate && p.expiryDate < today()).length, c: 'var(--danger)' },
+              {
+                l: 'Kadaluarsa', v: products.filter(p => {
+                  if (p.batches && p.batches.length > 0) {
+                    const active = p.batches.filter(b => b.qty > 0 && b.expiredDate);
+                    return active.length > 0 && active.every(b => b.expiredDate < today());
+                  }
+                  return p.expiryDate && p.expiryDate < today();
+                }).length, c: 'var(--danger)'
+              },
               { l: 'Total Nilai Stok', v: fmt(products.reduce((s, p) => s + p.cost * p.stock, 0)), c: 'var(--success)' },
             ].map((s, i) => (
               <div key={i} className="card" style={{ padding: '14px' }}>
@@ -2298,7 +2311,7 @@
                               return (
                                 <div key={b.id} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                                   <span className="tag" style={{ fontSize: 10 }}>{b.batchNo || '?'}</span>
-                                  {b.expiredDate && <span style={{ fontSize: 10, color: days !== null && days <= 0 ? 'var(--danger)' : days !== null && days <= 30 ? 'var(--warn)' : 'var(--muted)' }}>{fmtDate(b.expiredDate)}</span>}
+                                  {b.expiredDate && <span style={{ fontSize: 10, color: days !== null && days <= 0 ? 'var(--danger)' : days !== null && days <= 30 ? 'var(--warn)' : 'var(--muted)' }}>{fmtDateSlash(b.expiredDate)}</span>}
                                   <span className="mono" style={{ fontSize: 10, color: 'var(--success)' }}>{b.qty}pc</span>
                                 </div>
                               );
@@ -2307,15 +2320,20 @@
                           </div>
                         ) : (
                           <span style={{ color: p.expiryDate && p.expiryDate < today() ? 'var(--danger)' : 'var(--muted)', fontSize: 12 }}>
-                            {p.expiryDate ? fmtDate(p.expiryDate) : '-'}
+                            {p.expiryDate ? fmtDateSlash(p.expiryDate) : '-'}
                           </span>
                         )}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        {p.expiryDate && p.expiryDate < today() ? <span className="badge badge-danger">Kadaluarsa</span> :
-                          p.stock === 0 ? <span className="badge badge-danger">Habis</span>
-                            : p.stock <= p.minStock ? <span className="badge badge-warn">Menipis</span>
-                              : <span className="badge badge-success">Tersedia</span>}
+                        {(() => {
+                          const isExp = p.batches && p.batches.length > 0
+                            ? p.batches.filter(b => b.qty > 0 && b.expiredDate).every(b => b.expiredDate < today()) && p.batches.some(b => b.qty > 0 && b.expiredDate)
+                            : p.expiryDate && p.expiryDate < today();
+                          return isExp ? <span className="badge badge-danger">Kadaluarsa</span>
+                            : p.stock === 0 ? <span className="badge badge-danger">Habis</span>
+                              : p.stock <= p.minStock ? <span className="badge badge-warn">Menipis</span>
+                                : <span className="badge badge-success">Tersedia</span>;
+                        })()}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ display: 'flex', gap: 6 }}>
@@ -2540,7 +2558,7 @@
                             <div>
                               <div style={{ fontWeight: 600, fontSize: 13 }}>{b.batchNo || 'No Batch'}</div>
                               <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                                Exp: {b.expiredDate ? fmtDate(b.expiredDate) : '-'} · Sistem: <strong>{b.qty}</strong> pcs
+                                Exp: {b.expiredDate ? fmtDateSlash(b.expiredDate) : '-'} · Sistem: <strong>{b.qty}</strong> pcs
                               </div>
                             </div>
                             <div style={{ textAlign: 'center' }}>
@@ -2637,7 +2655,7 @@
                         <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
                           <div>
                             <span style={{ fontWeight: 600 }}>{b.batchNo || 'No Batch'}</span>
-                            {b.expiredDate && <span style={{ color: days !== null && days <= 30 ? 'var(--warn)' : 'var(--muted)', marginLeft: 8 }}>Exp: {fmtDate(b.expiredDate)} {days !== null && days <= 30 ? `(${days}h)` : ''}</span>}
+                            {b.expiredDate && <span style={{ color: days !== null && days <= 30 ? 'var(--warn)' : 'var(--muted)', marginLeft: 8 }}>Exp: {fmtDateSlash(b.expiredDate)} {days !== null && days <= 30 ? `(${days}h)` : ''}</span>}
                           </div>
                           <span className="mono" style={{ fontWeight: 700, color: 'var(--success)' }}>{b.qty} pcs</span>
                         </div>
